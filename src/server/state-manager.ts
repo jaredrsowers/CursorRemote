@@ -24,6 +24,7 @@ function emptyState(): CursorState {
     activeWindowId: '',
     composerQueue: { items: [] },
     questionnaire: null,
+    planReview: null,
   };
 }
 
@@ -320,6 +321,11 @@ export class StateManager extends EventEmitter {
 
     if (JSON.stringify(prev.questionnaire) !== JSON.stringify(next.questionnaire)) {
       patch.questionnaire = next.questionnaire;
+      hasChange = true;
+    }
+
+    if (JSON.stringify(prev.planReview) !== JSON.stringify(next.planReview)) {
+      patch.planReview = next.planReview;
       hasChange = true;
     }
 

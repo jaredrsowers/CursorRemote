@@ -93,6 +93,87 @@ export function extractionFunction(
     return null;
   }
 
+  const cleanBtnLabel = (raw: string): string =>
+    raw
+      .replace(/\u2318.*$/g, '')
+      // Cursor glues shortcuts onto labels ("BuildCtrl+⏎") with no word boundary before Ctrl.
+      .replace(/(ctrl|shift|alt|cmd)\+[\s\S]*$/gi, '')
+      .replace(/\s*(Shift\+)?⏎\s*/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const planButtonLabel = (btn: Element): string =>
+    cleanBtnLabel(btn.textContent || btn.getAttribute('aria-label') || btn.getAttribute('title') || '');
+
+  const findPlanButtonInScope = (scope: ParentNode, labelRe: RegExp): Element | null => {
+    for (const btn of Array.from(scope.querySelectorAll('button, [role="button"]'))) {
+      if (labelRe.test(planButtonLabel(btn))) return btn;
+    }
+    return null;
+  };
+
+  const findBuildButtonInScope = (scope: ParentNode): Element | null => {
+    const labeled = findPlanButtonInScope(scope, /^build$/i);
+    if (labeled) return labeled;
+    for (const btn of Array.from(scope.querySelectorAll('button, [role="button"]'))) {
+      const aria = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '').trim();
+      if (/build/i.test(aria)) return btn;
+    }
+    const viewBtn = findPlanButtonInScope(scope, /^view plan$/i);
+    const actionRow = viewBtn?.parentElement;
+    if (actionRow) {
+      const siblings = Array.from(actionRow.querySelectorAll('button, [role="button"]'));
+      for (const btn of siblings) {
+        if (btn === viewBtn) continue;
+        const label = planButtonLabel(btn);
+        const aria = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '').trim();
+        if (/^build$/i.test(label) || /^build$/i.test(aria)) return btn;
+      }
+    }
+    return null;
+  };
+
+  const resolveToolCallCardRoot = (body: Element): Element | null =>
+    body.closest('[class*="tool-call-card"]:not([class*="tool-call-card__"])') ?? body.parentElement;
+
+  const extractPlanLabelFromScope = (scope: ParentNode): string => {
+    const labeledEl = scope.querySelector('.composer-create-plan-label, .plan-execution-label');
+    const fromClass = (labeledEl?.textContent || '').trim();
+    if (/\.plan\.md$/i.test(fromClass)) return fromClass;
+
+    for (const el of Array.from(scope.querySelectorAll('a[href], [href]'))) {
+      const href = el.getAttribute('href') || '';
+      const fromHref = href.match(/[\w._-]+\.plan\.md/i)?.[0];
+      if (fromHref) return fromHref;
+    }
+
+    const fromText = (scope.textContent || '').match(/[\w._-]+\.plan\.md/i)?.[0];
+    return fromText || '';
+  };
+
+  const extractPlanToolbarActions = (
+    scope: ParentNode
+  ): { label: string; type: 'view_plan' | 'build'; selectorPath: string }[] => {
+    const actions: { label: string; type: 'view_plan' | 'build'; selectorPath: string }[] = [];
+    const viewBtn = findPlanButtonInScope(scope, /^view plan$/i);
+    const buildBtn = findBuildButtonInScope(scope);
+    if (viewBtn) {
+      actions.push({
+        label: 'View Plan',
+        type: 'view_plan' as const,
+        selectorPath: buildSelectorPath(viewBtn),
+      });
+    }
+    if (buildBtn) {
+      actions.push({
+        label: 'Build',
+        type: 'build' as const,
+        selectorPath: buildSelectorPath(buildBtn),
+      });
+    }
+    return actions;
+  };
+
   /**
    * Line diff stats from Edit tool UI. Tries legacy classes, then +N / -M chip spans
    * (Cursor sometimes omits or renames .ui-edit-tool-call__additions / __deletions).
@@ -566,6 +647,35 @@ export function extractionFunction(
         patchRaw.toolStatus = toolStatus;
       }
 
+      const toolCallCardBody =
+        toolRoot.querySelector('[class*="tool-call-card__body"]') ??
+        toolRoot.closest('[class*="tool-call-card"]')?.querySelector('[class*="tool-call-card__body"]');
+      if (toolCallCardBody) {
+        const cardPlanActions = extractPlanToolbarActions(toolCallCardBody);
+        if (cardPlanActions.some((action) => action.type === 'build' || action.type === 'view_plan')) {
+          const cardRoot = resolveToolCallCardRoot(toolCallCardBody);
+          const header = cardRoot?.querySelector('[class*="tool-call-card__header"]');
+          const title = ((header?.textContent || '').trim().split('\n')[0] || 'Plan').trim();
+          const label = extractPlanLabelFromScope(cardRoot || toolCallCardBody);
+          const descRoot = toolCallCardBody.querySelector('.markdown-root, [class*="markdown"]');
+          return {
+            element: {
+              type: 'plan' as const,
+              id: messageId,
+              flatIndex,
+              label,
+              title,
+              todosCompleted: 0,
+              todosTotal: 0,
+              description: descRoot ? (descRoot.textContent || '').trim() : undefined,
+              descriptionHtml: descRoot ? (descRoot.innerHTML || '').trim() : undefined,
+              actions: cardPlanActions,
+            },
+            parsedAs: 'plan:tool-card',
+          };
+        }
+      }
+
       const planContainer = toolRoot.querySelector('.composer-create-plan-container');
       if (planContainer) {
         const label = (planContainer.querySelector('.composer-create-plan-label')?.textContent || '').trim();
@@ -610,28 +720,54 @@ export function extractionFunction(
           todosTotal = parseInt(headerMatch[0], 10);
         }
 
-        const actions: { label: string; type: 'view_plan' | 'build'; selectorPath: string }[] = [];
-        const viewPlanBtn = planContainer.querySelector('.composer-create-plan-view-plan-button');
-        if (viewPlanBtn) {
-          actions.push({
-            label: 'View Plan',
-            type: 'view_plan' as const,
-            selectorPath: buildSelectorPath(viewPlanBtn),
-          });
-        }
-        let buildBtn: Element | null = null;
-        const buildCandidates = planContainer.querySelectorAll('.composer-create-plan-build-button');
-        for (const b of Array.from(buildCandidates)) {
-          const tx = (b.textContent || '').replace(/\s+/g, ' ').trim();
-          if (/build/i.test(tx) && tx.length > 2) {
-            buildBtn = b;
-            break;
+        const findPlanButton = (scope: ParentNode, labelRe: RegExp): Element | null => {
+          for (const btn of Array.from(scope.querySelectorAll('button, [role="button"]'))) {
+            const text = cleanBtnLabel(btn.textContent || btn.getAttribute('aria-label') || '');
+            if (labelRe.test(text)) return btn;
           }
-        }
-        if (!buildBtn && buildCandidates.length > 0) buildBtn = buildCandidates[0];
-        if (buildBtn) {
-          actions.push({ label: 'Build', type: 'build' as const, selectorPath: buildSelectorPath(buildBtn) });
-        }
+          return null;
+        };
+        const extractPlanWidgetActions = (
+          planRoot: Element
+        ): { label: string; type: 'view_plan' | 'build'; selectorPath: string }[] => {
+          const actions: { label: string; type: 'view_plan' | 'build'; selectorPath: string }[] = [];
+          const viewPlanBtn =
+            planRoot.querySelector('.composer-create-plan-view-plan-button') ??
+            findPlanButton(planRoot, /^view plan$/i);
+          if (viewPlanBtn) {
+            actions.push({
+              label: 'View Plan',
+              type: 'view_plan' as const,
+              selectorPath: buildSelectorPath(viewPlanBtn),
+            });
+          }
+
+          let buildBtn: Element | null = null;
+          const buildCandidates = planRoot.querySelectorAll('.composer-create-plan-build-button');
+          for (const b of Array.from(buildCandidates)) {
+            const tx = cleanBtnLabel(b.textContent || '');
+            if (/^build$/i.test(tx)) {
+              buildBtn = b;
+              break;
+            }
+          }
+          if (!buildBtn && buildCandidates.length > 0) buildBtn = buildCandidates[0];
+          if (!buildBtn) buildBtn = findPlanButton(planRoot, /^build$/i);
+          if (!buildBtn) {
+            const toolbar = document.querySelector('#composer-toolbar-section');
+            if (toolbar) buildBtn = findPlanButton(toolbar, /^build$/i);
+          }
+          if (buildBtn) {
+            actions.push({
+              label: 'Build',
+              type: 'build' as const,
+              selectorPath: buildSelectorPath(buildBtn),
+            });
+          }
+          return actions;
+        };
+
+        const actions = extractPlanWidgetActions(planContainer);
 
         const modelEl = planContainer.querySelector('.composer-unified-dropdown-model');
         let model: string | undefined;
@@ -1023,6 +1159,38 @@ export function extractionFunction(
         continue;
       }
 
+      // --- Cursor 3.8+ plan tool card in transcript activity row ---
+      const transcriptActivity = wrapper.querySelector(
+        '.agent-transcript-row-activity, [class*="transcript-row-activity"]'
+      );
+      if (transcriptActivity) {
+        const cardBody = transcriptActivity.querySelector('[class*="tool-call-card__body"]');
+        if (cardBody) {
+          const planActions = extractPlanToolbarActions(cardBody);
+          if (planActions.some((action) => action.type === 'build' || action.type === 'view_plan')) {
+            const cardRoot = resolveToolCallCardRoot(cardBody);
+            const header = cardRoot?.querySelector('[class*="tool-call-card__header"]');
+            const title = ((header?.textContent || '').trim().split('\n')[0] || 'Plan').trim();
+            const label = extractPlanLabelFromScope(cardRoot || cardBody);
+            const descRoot = cardBody.querySelector('.markdown-root, [class*="markdown"]');
+            elements.push({
+              type: 'plan' as const,
+              id: messageId,
+              flatIndex,
+              label,
+              title,
+              todosCompleted: 0,
+              todosTotal: 0,
+              description: descRoot ? (descRoot.textContent || '').trim() : undefined,
+              descriptionHtml: descRoot ? (descRoot.innerHTML || '').trim() : undefined,
+              actions: planActions,
+            });
+            rawEl.parsedAs = 'plan:transcript-activity';
+            continue;
+          }
+        }
+      }
+
       // --- Step-group header (Thought, Explored, Searched, Read, etc.) — lone wrapper, no message-role ---
       const thoughtEl = wrapper.querySelector('.ui-collapsible.ui-step-group-collapsible');
       if (thoughtEl && !role) {
@@ -1085,6 +1253,29 @@ export function extractionFunction(
             todosCompleted = todos.filter(function(t) { return t.status === 'completed'; }).length;
           }
 
+          const legacyPlanActions: { label: string; type: 'view_plan' | 'build'; selectorPath: string }[] = [];
+          const toolbar = document.querySelector('#composer-toolbar-section');
+          if (toolbar) {
+            for (const btn of Array.from(toolbar.querySelectorAll('button, [role="button"]'))) {
+              const text = (btn.textContent || btn.getAttribute('aria-label') || '')
+                .replace(/\s+/g, ' ')
+                .trim();
+              if (/^view plan$/i.test(text)) {
+                legacyPlanActions.push({
+                  label: 'View Plan',
+                  type: 'view_plan',
+                  selectorPath: buildSelectorPath(btn),
+                });
+              } else if (/^build$/i.test(text)) {
+                legacyPlanActions.push({
+                  label: 'Build',
+                  type: 'build',
+                  selectorPath: buildSelectorPath(btn),
+                });
+              }
+            }
+          }
+
           elements.push({
             type: 'plan' as const,
             id: messageId,
@@ -1094,6 +1285,7 @@ export function extractionFunction(
             todosCompleted,
             todosTotal,
             todos: todos.length > 0 ? todos : undefined,
+            actions: legacyPlanActions.length > 0 ? legacyPlanActions : undefined,
           });
           rawEl.parsedAs = 'plan';
           continue;
@@ -1212,6 +1404,45 @@ export function extractionFunction(
       }
     }
 
+    // --- Plan tool cards (Cursor 3.8+ ui-tool-call-card with Build / View Plan) ---
+    const planCardBodies = Array.from(container.querySelectorAll('[class*="tool-call-card__body"]'));
+    for (let pci = planCardBodies.length - 1; pci >= 0; pci--) {
+      const body = planCardBodies[pci];
+      const planActions = extractPlanToolbarActions(body);
+      if (!planActions.some((action) => action.type === 'build' || action.type === 'view_plan')) continue;
+      const buildPath = planActions.find((action) => action.type === 'build')?.selectorPath;
+      const viewPath = planActions.find((action) => action.type === 'view_plan')?.selectorPath;
+      const alreadyCaptured = elements.some(
+        (el) =>
+          el.type === 'plan' &&
+          ((buildPath &&
+            el.actions?.some((action) => action.type === 'build' && action.selectorPath === buildPath)) ||
+            (viewPath &&
+              el.actions?.some((action) => action.type === 'view_plan' && action.selectorPath === viewPath)))
+      );
+      if (alreadyCaptured) break;
+      const cardRoot = resolveToolCallCardRoot(body);
+      const header = cardRoot?.querySelector('[class*="tool-call-card__header"]');
+      const title = ((header?.textContent || '').trim().split('\n')[0] || 'Plan').trim();
+      const label = extractPlanLabelFromScope(cardRoot || body);
+      const row = body.closest('[data-message-id], [data-flat-index], .agent-transcript-row');
+      const planId = row?.getAttribute('data-message-id') || `plan-card-${pci}`;
+      const descRoot = body.querySelector('.markdown-root, [class*="markdown"]');
+      elements.push({
+        type: 'plan' as const,
+        id: planId,
+        flatIndex: elements.length,
+        label,
+        title,
+        todosCompleted: 0,
+        todosTotal: 0,
+        description: descRoot ? (descRoot.textContent || '').trim() : undefined,
+        descriptionHtml: descRoot ? (descRoot.innerHTML || '').trim() : undefined,
+        actions: planActions,
+      });
+      break;
+    }
+
     // --- Orphan activity indicators (not inside any message wrapper) ---
     const _orphanIndicators: Array<{ cls: string; text: string; parentCls: string }> = [];
     const allIndicators = container.querySelectorAll('.loading-indicator-v3, .make-shine');
@@ -1246,8 +1477,6 @@ export function extractionFunction(
       const popup = btn.getAttribute('aria-haspopup');
       return popup === 'menu' || popup === 'true' || popup === 'listbox';
     };
-    const cleanBtnLabel = (raw: string): string =>
-      raw.replace(/\s*(Shift\+)?⏎\s*/g, '').replace(/\s+/g, ' ').trim();
     const buttonLabelMatchesPattern = (label: string, pattern: string): boolean => {
       const normalizedLabel = label.replace(/\s+/g, ' ').trim();
       const normalizedPattern = pattern.replace(/\s+/g, ' ').trim();
@@ -1806,6 +2035,66 @@ export function extractionFunction(
       };
     }
 
+    let planReview: {
+      title?: string;
+      label?: string;
+      buildSelectorPath: string;
+      viewPlanSelectorPath?: string;
+    } | null = null;
+    for (let pri = planCardBodies.length - 1; pri >= 0; pri--) {
+      const body = planCardBodies[pri];
+      const planActions = extractPlanToolbarActions(body);
+      const buildAction = planActions.find((action) => action.type === 'build');
+      const viewAction = planActions.find((action) => action.type === 'view_plan');
+      if (!buildAction) continue;
+      const cardRoot = resolveToolCallCardRoot(body);
+      const header = cardRoot?.querySelector('[class*="tool-call-card__header"]');
+      const title = ((header?.textContent || '').trim().split('\n')[0] || '').trim();
+      const label = extractPlanLabelFromScope(cardRoot || body);
+      planReview = {
+        ...(label ? { label } : {}),
+        ...(title ? { title } : {}),
+        buildSelectorPath: buildAction.selectorPath,
+        ...(viewAction ? { viewPlanSelectorPath: viewAction.selectorPath } : { viewPlanSelectorPath: 'stable:vpl' }),
+      };
+      break;
+    }
+    if (!planReview && toolbarSection) {
+      const buildBtn = findBuildButtonInScope(toolbarSection);
+      const viewPlanBtn = findPlanButtonInScope(toolbarSection, /^view plan$/i);
+      if (buildBtn) {
+        const planMetaRoot =
+          container.querySelector('.composer-create-plan-container') ??
+          container.querySelector('.plan-execution-message-content');
+        const label = (
+          planMetaRoot?.querySelector('.composer-create-plan-label, .plan-execution-label')?.textContent || ''
+        ).trim();
+        const title = (
+          planMetaRoot?.querySelector('.composer-create-plan-title, .plan-execution-title')?.textContent || ''
+        ).trim();
+        planReview = {
+          ...(label ? { label } : {}),
+          ...(title ? { title } : {}),
+          buildSelectorPath: buildSelectorPath(buildBtn),
+          ...(viewPlanBtn
+            ? { viewPlanSelectorPath: buildSelectorPath(viewPlanBtn) }
+            : { viewPlanSelectorPath: 'stable:vpl' }),
+        };
+      }
+    }
+    if (!planReview) {
+      const buildBtn = findBuildButtonInScope(container);
+      const viewPlanBtn = findPlanButtonInScope(container, /^view plan$/i);
+      if (buildBtn) {
+        planReview = {
+          buildSelectorPath: buildSelectorPath(buildBtn),
+          ...(viewPlanBtn
+            ? { viewPlanSelectorPath: buildSelectorPath(viewPlanBtn) }
+            : { viewPlanSelectorPath: 'stable:vpl' }),
+        };
+      }
+    }
+
     return {
       connected: true,
       extractorStatus: 'ok',
@@ -1827,6 +2116,7 @@ export function extractionFunction(
       activeWindowId: '',
       composerQueue: { items: queueItems, ...(queueLabel ? { queueLabel } : {}) },
       questionnaire,
+      planReview,
       _rawSignals,
     };
   } catch {

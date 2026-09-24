@@ -1296,6 +1296,47 @@ header {
 
 .questionnaire-bar.hidden { display: none; }
 
+.plan-review-bar {
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.plan-review-bar.hidden { display: none; }
+
+.plan-modal-loading {
+  padding: 16px;
+  color: var(--text-muted, #888);
+  font-size: 14px;
+  text-align: center;
+}
+
+.plan-review-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.plan-review-icon { font-size: 14px; }
+
+.plan-review-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-review-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .questionnaire-header {
   display: flex;
   align-items: center;
@@ -1918,6 +1959,7 @@ header {
   .btn-approve, .btn-reject { height: 44px; }
   .approval-bar,
   .questionnaire-bar,
+  .plan-review-bar,
   #input-bar {
     padding-left: max(14px, calc((100% - 800px) / 2));
     padding-right: max(14px, calc((100% - 800px) / 2));

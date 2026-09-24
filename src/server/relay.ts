@@ -9,7 +9,7 @@ import type { ServerConfig, CursorState, CommandPayload, CommandResult } from '.
 import type { StateManager } from './state-manager.js';
 import type { CommandExecutor } from './command-executor.js';
 import type { CDPBridge } from './cdp-bridge.js';
-import { markdownToWebHtml, readPlanFile } from './plan-files.js';
+import { markdownToWebHtml, resolvePlanFile } from './plan-files.js';
 import {
   WEBAPP_SESSION_COOKIE,
   createWebappSessionStore,
@@ -542,17 +542,26 @@ export class Relay {
       });
 
       socket.on('command:get_plan_full', async (payload: CommandPayload) => {
-        if (!payload.commandId || !payload.planLabel) {
+        if (
+          !payload.commandId ||
+          (!payload.planLabel && !payload.planTitle && !payload.planDescription)
+        ) {
           socket.emit('command:result', {
             commandId: payload.commandId ?? 'unknown',
             ok: false,
-            error: 'Missing commandId or planLabel',
+            error: 'Missing commandId or plan identifiers',
           } satisfies CommandResult);
           return;
         }
-        console.log(`[relay] Command: get_plan_full for ${payload.planLabel} from ${socket.id}`);
-        const planFile = readPlanFile(payload.planLabel);
-        if (!planFile) {
+        console.log(
+          `[relay] Command: get_plan_full for ${payload.planLabel || payload.planTitle || 'resolved'} from ${socket.id}`
+        );
+        const resolved = resolvePlanFile({
+          label: payload.planLabel,
+          title: payload.planTitle,
+          description: payload.planDescription,
+        });
+        if (!resolved) {
           socket.emit('command:result', {
             commandId: payload.commandId,
             ok: false,
@@ -564,9 +573,10 @@ export class Relay {
           commandId: payload.commandId,
           ok: true,
           data: {
-            todos: planFile.todos,
-            body: planFile.body,
-            bodyHtml: markdownToWebHtml(planFile.body),
+            resolvedLabel: resolved.label,
+            todos: resolved.data.todos,
+            body: resolved.data.body,
+            bodyHtml: markdownToWebHtml(resolved.data.body),
           },
         } satisfies CommandResult);
       });

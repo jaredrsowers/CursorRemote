@@ -66,6 +66,14 @@ export interface Questionnaire {
   continueDisabled: boolean;
 }
 
+/** Build / View Plan controls in the composer toolbar (outside chat transcript). */
+export interface PlanReview {
+  title?: string;
+  label?: string;
+  buildSelectorPath: string;
+  viewPlanSelectorPath?: string;
+}
+
 export interface CursorState {
   connected: boolean;
   /** Health of DOM extraction independent from the CDP websocket connection. */
@@ -99,6 +107,8 @@ export interface CursorState {
   composerQueue: ComposerQueueState;
   /** Agent questionnaire widget (multiple-choice questions). */
   questionnaire: Questionnaire | null;
+  /** Plan review controls in the composer toolbar when Build/View Plan are outside the transcript. */
+  planReview: PlanReview | null;
   _rawSignals?: RawSignals;
 }
 
@@ -323,6 +333,8 @@ export interface CommandPayload {
   modeId?: string;
   modelId?: string;
   planLabel?: string;
+  planTitle?: string;
+  planDescription?: string;
   planModelId?: string;
   tabTitle?: string;
   windowId?: string;

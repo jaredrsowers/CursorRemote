@@ -24,6 +24,7 @@
     activeWindowId: '',
     composerQueue: { items: [] },
     questionnaire: null,
+    planReview: null,
   };
 
   function getAuthToken() {
@@ -100,6 +101,7 @@
   let autoScrollJob = 0;
   let notificationPermission = 'default';
   const notifiedMessageIds = new Set();
+  let lastPlanReviewNotificationKey = null;
   let activePlanModal = null;
   let activePlanModelContext = null;
   const pendingCommandResults = new Map();
@@ -135,6 +137,10 @@
   const $questionnaireBar = document.getElementById('questionnaire-bar');
   const $questionnaireStepper = document.getElementById('questionnaire-stepper');
   const $questionnaireQuestions = document.getElementById('questionnaire-questions');
+  const $planReviewBar = document.getElementById('plan-review-bar');
+  const $planReviewTitle = document.getElementById('plan-review-title');
+  const $btnPlanView = document.getElementById('btn-plan-view');
+  const $btnPlanBuild = document.getElementById('btn-plan-build');
   const $btnQSkip = document.getElementById('btn-q-skip');
   const $btnQContinue = document.getElementById('btn-q-continue');
   const $input = document.getElementById('message-input');
@@ -326,6 +332,26 @@
   $planModalOverlay.addEventListener('click', (e) => {
     if (e.target === $planModalOverlay) closePlanModal();
   });
+  $btnPlanView.addEventListener('click', () => {
+    const review = state.planReview;
+    if (!review) return;
+    const planMsg = findPlanMessageForReview(review);
+    if (planMsg) {
+      openPlanModal(planMsg);
+      return;
+    }
+    openPlanModal({
+      id: 'plan-review',
+      label: review.label || '',
+      title: review.title || 'Plan',
+      type: 'plan',
+    });
+  });
+  $btnPlanBuild.addEventListener('click', () => {
+    const review = state.planReview;
+    if (!review) return;
+    clickPlanBuild(review.buildSelectorPath, 'Build');
+  });
 
   function sendMessage() {
     const text = $input.value.trim();
@@ -345,6 +371,7 @@
     renderMessages();
     renderApprovals();
     renderQuestionnaire();
+    renderPlanReview();
     renderInputState();
     renderTabs();
     renderModeModel();
@@ -988,12 +1015,34 @@
 
   // --- Plan block ---
 
+  function planHasViewableContent(msg) {
+    if (!msg) return false;
+    if (msg.label) return true;
+    if (msg.descriptionHtml || msg.description) return true;
+    if (msg.todos && msg.todos.length > 0) return true;
+    if (msg.todosTotal > 0) return true;
+    return false;
+  }
+
+  function planReviewHasViewableContent(review) {
+    if (!review) return false;
+    if (review.label) return true;
+    return planHasViewableContent(findPlanMessageForReview(review));
+  }
+
   function emitClickAction(selectorPath, actionLabel) {
     socket.emit('command:click_action', {
       commandId: newCommandId(),
       selectorPath,
       actionLabel,
     });
+  }
+
+  function clickPlanBuild(selectorPath, actionLabel) {
+    closePlanModal();
+    state.planReview = null;
+    renderPlanReview();
+    emitClickAction(selectorPath || 'stable:bld', actionLabel || 'Build');
   }
 
   function buildPlanFullContent(planData) {
@@ -1050,33 +1099,66 @@
 
   function renderPlanModal(msg) {
     if (!msg) return;
-    $planModalLabel.textContent = msg.label || '';
-    $planModalLabel.style.display = msg.label ? '' : 'none';
+    const resolvedLabel =
+      (activePlanModal && activePlanModal.fullData && activePlanModal.fullData.resolvedLabel) ||
+      msg.label ||
+      '';
+    $planModalLabel.textContent = resolvedLabel;
+    $planModalLabel.style.display = resolvedLabel ? '' : 'none';
     $planModalTitle.textContent = msg.title || 'Plan';
     $planModalBody.innerHTML = '';
-    $planModalBody.appendChild(buildPlanModalContent(msg, activePlanModal && activePlanModal.fullData));
+    if (activePlanModal && activePlanModal.loading) {
+      const loading = document.createElement('div');
+      loading.className = 'plan-modal-loading';
+      loading.textContent = 'Loading plan…';
+      $planModalBody.appendChild(loading);
+    }
+    $planModalBody.appendChild(
+      buildPlanModalContent(msg, activePlanModal && activePlanModal.fullData)
+    );
   }
 
   async function loadFullPlanIntoModal(msg) {
-    if (!msg.label || !activePlanModal || activePlanModal.id !== msg.id) return;
+    if (!activePlanModal || activePlanModal.id !== msg.id) return;
+    if (!msg.label && !msg.title && !msg.description) return;
     activePlanModal.loading = true;
+    renderPlanModal(msg);
     const result = await sendCommandAwaitResult('command:get_plan_full', {
       commandId: newCommandId(),
       type: 'get_plan_full',
-      planLabel: msg.label,
+      planLabel: msg.label || undefined,
+      planTitle: msg.title || undefined,
+      planDescription: msg.description || undefined,
     });
     if (!activePlanModal || activePlanModal.id !== msg.id) return;
     activePlanModal.loading = false;
-    if (!result.ok || !result.data) return;
+    if (!result.ok || !result.data) {
+      if (!planHasViewableContent(msg)) {
+        showToast(result.error || 'Plan file not found', 'error');
+        closePlanModal();
+      }
+      renderPlanModal(msg);
+      return;
+    }
     activePlanModal.fullData = result.data;
+    if (result.data.resolvedLabel) msg = { ...msg, label: result.data.resolvedLabel };
     renderPlanModal(msg);
+  }
+
+  function findPlanMessageForReview(review) {
+    const plans = (state.messages || []).filter((msg) => msg.type === 'plan');
+    if (review?.label) {
+      const labeled = plans.find((msg) => msg.label === review.label);
+      if (labeled) return labeled;
+    }
+    return plans.length > 0 ? plans[plans.length - 1] : null;
   }
 
   function openPlanModal(msg) {
     activePlanModal = { id: msg.id, label: msg.label || '', fullData: null, loading: false };
     renderPlanModal(msg);
     $planModalOverlay.classList.remove('hidden');
-    loadFullPlanIntoModal(msg);
+    if (msg.label || msg.title || msg.description) loadFullPlanIntoModal(msg);
   }
 
   function closePlanModal() {
@@ -1203,23 +1285,22 @@
       card.appendChild(progress);
     }
 
-    const hasActions = (msg.actions && msg.actions.length > 0) || msg.modelDropdownSelectorPath || msg.model;
-    if (hasActions) {
+    const viewAct = msg.actions ? msg.actions.find((a) => a.type === 'view_plan') : null;
+    const buildAct = msg.actions ? msg.actions.find((a) => a.type === 'build') : null;
+    const hasModel = msg.modelDropdownSelectorPath || msg.model;
+    if (viewAct || buildAct || hasModel) {
       const toolbar = document.createElement('div');
       toolbar.className = 'plan-actions-toolbar';
 
       const left = document.createElement('div');
       left.className = 'plan-actions-left';
-      if (msg.actions) {
-        const viewAct = msg.actions.find((a) => a.type === 'view_plan');
-        if (viewAct) {
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'plan-btn plan-btn-view';
-          btn.textContent = viewAct.label || 'View Plan';
-          btn.addEventListener('click', () => openPlanModal(msg));
-          left.appendChild(btn);
-        }
+      if (viewAct && planHasViewableContent(msg)) {
+        const btnView = document.createElement('button');
+        btnView.type = 'button';
+        btnView.className = 'plan-btn plan-btn-view';
+        btnView.textContent = viewAct.label || 'View Plan';
+        btnView.addEventListener('click', () => openPlanModal(msg));
+        left.appendChild(btnView);
       }
       toolbar.appendChild(left);
 
@@ -1249,16 +1330,15 @@
 
       const right = document.createElement('div');
       right.className = 'plan-actions-right';
-      if (msg.actions) {
-        const buildAct = msg.actions.find((a) => a.type === 'build');
-        if (buildAct) {
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'plan-btn plan-btn-build';
-          btn.textContent = buildAct.label || 'Build';
-          btn.addEventListener('click', () => emitClickAction(buildAct.selectorPath, buildAct.label || 'Build'));
-          right.appendChild(btn);
-        }
+      if (buildAct) {
+        const btnBuild = document.createElement('button');
+        btnBuild.type = 'button';
+        btnBuild.className = 'plan-btn plan-btn-build';
+        btnBuild.textContent = buildAct.label || 'Build';
+        btnBuild.addEventListener('click', () =>
+          clickPlanBuild(buildAct.selectorPath, buildAct.label || 'Build')
+        );
+        right.appendChild(btnBuild);
       }
       toolbar.appendChild(right);
       card.appendChild(toolbar);
@@ -1523,6 +1603,23 @@
       fireNotification(approval.description || 'Agent needs approval', 'cursor-approval');
     } else {
       $approvalBar.classList.add('hidden');
+    }
+  }
+
+  function renderPlanReview() {
+    const review = state.planReview;
+    if (!review || !review.buildSelectorPath) {
+      $planReviewBar.classList.add('hidden');
+      lastPlanReviewNotificationKey = null;
+      return;
+    }
+    $planReviewBar.classList.remove('hidden');
+    $planReviewTitle.textContent = review.title || review.label || 'Plan ready';
+    $btnPlanView.style.display = planReviewHasViewableContent(review) ? '' : 'none';
+    const notifyKey = [review.buildSelectorPath, review.title || '', review.label || ''].join('\0');
+    if (notifyKey !== lastPlanReviewNotificationKey) {
+      lastPlanReviewNotificationKey = notifyKey;
+      fireNotification('Plan is ready to build', 'cursor-plan-review');
     }
   }
 

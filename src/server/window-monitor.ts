@@ -37,6 +37,7 @@ export interface WindowSnapshot {
    *  Extracted per window so its card can be routed to the correct topic even
    *  when the window is not the active CDP home window. Null when absent. */
   questionnaire: Questionnaire | null;
+  planReview: import('./types.js').PlanReview | null;
   lastUpdated: number;
   /** data-composer-id of the active composer in this window. Same agent shown
    *  via Cursor's global rail in another window will share this id; two
@@ -256,6 +257,7 @@ export class WindowMonitor extends EventEmitter {
       mode: state.mode,
       model: state.model,
       questionnaire: state.questionnaire,
+      planReview: state.planReview,
       lastUpdated: Date.now(),
       activeComposerId: state.activeComposerId ?? '',
     };
@@ -267,6 +269,8 @@ export class WindowMonitor extends EventEmitter {
     const prevApprovalSig = prev ? approvalsFingerprint(prev.pendingApprovals) : '';
     const questionnaireSig = questionnaireFingerprint(snapshot.questionnaire);
     const prevQuestionnaireSig = prev ? questionnaireFingerprint(prev.questionnaire) : '';
+    const planReviewSig = JSON.stringify(snapshot.planReview);
+    const prevPlanReviewSig = prev ? JSON.stringify(prev.planReview) : '';
     const changed = !prev
       || prev.messages.length !== snapshot.messages.length
       || (prev.messages.length > 0 && prev.messages[prev.messages.length - 1]?.id !== snapshot.messages[snapshot.messages.length - 1]?.id)
@@ -276,6 +280,7 @@ export class WindowMonitor extends EventEmitter {
       || prev.agentActivitySource !== snapshot.agentActivitySource
       || approvalSig !== prevApprovalSig
       || questionnaireSig !== prevQuestionnaireSig
+      || planReviewSig !== prevPlanReviewSig
       || queueSig !== prevQueueSig
       || prev.mode?.current !== snapshot.mode?.current
       || prev.model?.current !== snapshot.model?.current
@@ -377,6 +382,7 @@ export class WindowMonitor extends EventEmitter {
           mode: state.mode,
           model: state.model,
           questionnaire: state.questionnaire,
+          planReview: state.planReview,
           lastUpdated: Date.now(),
           activeComposerId: state.activeComposerId ?? '',
         };
@@ -388,6 +394,8 @@ export class WindowMonitor extends EventEmitter {
         const paSig = prev ? approvalsFingerprint(prev.pendingApprovals) : '';
         const qnSig = questionnaireFingerprint(snapshot.questionnaire);
         const pqnSig = prev ? questionnaireFingerprint(prev.questionnaire) : '';
+        const prSig = JSON.stringify(snapshot.planReview);
+        const pprSig = prev ? JSON.stringify(prev.planReview) : '';
         const changed = !prev
           || prev.messages.length !== snapshot.messages.length
           || (prev.messages.length > 0 && prev.messages[prev.messages.length - 1]?.id !== snapshot.messages[snapshot.messages.length - 1]?.id)
@@ -397,6 +405,7 @@ export class WindowMonitor extends EventEmitter {
           || prev.agentActivitySource !== snapshot.agentActivitySource
           || aSig !== paSig
           || qnSig !== pqnSig
+          || prSig !== pprSig
           || qSig !== pqSig
           || prev.mode?.current !== snapshot.mode?.current
           || prev.model?.current !== snapshot.model?.current

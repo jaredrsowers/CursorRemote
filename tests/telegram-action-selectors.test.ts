@@ -4,7 +4,7 @@ import { ACTION_SELECTORS, resolveStableActionSelector, parseCallbackData } from
 
 describe('telegram ACTION_SELECTORS', () => {
   it('covers every callback action used by approval buttons', () => {
-    for (const action of ['apr', 'rej', 'all', 'run', 'skp', 'alw', 'bld']) {
+    for (const action of ['apr', 'rej', 'all', 'run', 'skp', 'alw', 'bld', 'vpl']) {
       assert.ok(ACTION_SELECTORS[action], `missing entry for action "${action}"`);
       assert.ok(ACTION_SELECTORS[action].length > 0, `empty entry for action "${action}"`);
     }

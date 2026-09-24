@@ -158,6 +158,153 @@ describe('extractionFunction', () => {
     assert.notEqual(state.agentStatus, 'waiting_approval');
   });
 
+  it('extracts Build when label includes glued keyboard shortcut (BuildCtrl+⏎)', () => {
+    const state = withDom(`
+      <main id="root">
+        <div class="ui-tool-call-card">
+          <div class="ui-tool-call-card__header">Shortcut Build Plan</div>
+          <div class="ui-tool-call-card__body">
+            <button type="button">View Plan</button>
+            <button type="button">BuildCtrl+⏎</button>
+          </div>
+        </div>
+      </main>
+    `);
+
+    assert.ok(state.planReview?.buildSelectorPath);
+    const plan = state.messages.find((message) => message.type === 'plan');
+    assert.ok(plan?.actions?.some((action) => action.type === 'build'));
+  });
+
+  it('extracts Build from icon-only sibling button next to View Plan in tool-call-card', () => {
+    const state = withDom(`
+      <main id="root">
+        <div class="ui-tool-call-card">
+          <div class="ui-tool-call-card__header">Icon Build Plan</div>
+          <div class="ui-tool-call-card__body">
+            <div class="ui-action-row">
+              <button type="button" aria-label="View Plan">View Plan</button>
+              <button type="button" aria-label="Build"><span class="codicon"></span></button>
+            </div>
+          </div>
+        </div>
+      </main>
+    `);
+
+    assert.ok(state.planReview?.buildSelectorPath);
+    const plan = state.messages.find((message) => message.type === 'plan');
+    assert.ok(plan?.actions?.some((action) => action.type === 'build'));
+  });
+
+  it('extracts plan from Cursor 3.8 ui-tool-call-card with Build and View Plan buttons', () => {
+    const state = withDom(`
+      <main id="root">
+        <div class="virtualized-composer-messages-row" data-find-row-key="activity:plan-1">
+          <div class="agent-transcript-row agent-transcript-row-activity">
+            <div class="ui-tool-call-card">
+              <div class="ui-tool-call-card__header">Say Hi Plan</div>
+              <div class="ui-tool-call-card__body">
+                <button type="button">View Plan</button>
+                <button type="button">Build</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    `);
+
+    assert.ok(state.planReview, 'expected planReview from tool-call-card');
+    assert.match(state.planReview!.buildSelectorPath, /button/i);
+    const plan = state.messages.find((message) => message.type === 'plan');
+    assert.ok(plan, 'expected plan message');
+    assert.equal(plan.title, 'Say Hi Plan');
+    assert.ok(plan.actions?.some((action) => action.type === 'build'));
+    assert.ok(plan.actions?.some((action) => action.type === 'view_plan'));
+  });
+
+  it('extracts .plan.md label from tool-call-card text when present', () => {
+    const state = withDom(`
+      <main id="root">
+        <div class="virtualized-composer-messages-row" data-find-row-key="activity:plan-1">
+          <div class="agent-transcript-row agent-transcript-row-activity">
+            <div class="ui-tool-call-card">
+              <div class="ui-tool-call-card__header">Say Hi Plan</div>
+              <div class="ui-tool-call-card__body">
+                <div class="markdown-root">Saved to say_hi.plan.md</div>
+                <button type="button">View Plan</button>
+                <button type="button">Build</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    `);
+
+    const plan = state.messages.find((message) => message.type === 'plan');
+    assert.ok(plan, 'expected plan message');
+    assert.equal(plan!.label, 'say_hi.plan.md');
+    assert.ok(state.planReview?.label === 'say_hi.plan.md');
+  });
+
+  it('does not set planReview when only View Plan remains after build', () => {
+    const state = withDom(`
+      <main id="root">
+        <div class="virtualized-composer-messages-row" data-find-row-key="activity:plan-1">
+          <div class="agent-transcript-row agent-transcript-row-activity">
+            <div class="ui-tool-call-card">
+              <div class="ui-tool-call-card__header">Say Hi Plan</div>
+              <div class="ui-tool-call-card__body">
+                <button type="button">View Plan</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    `);
+
+    assert.equal(state.planReview, null);
+    const plan = state.messages.find((message) => message.type === 'plan');
+    assert.ok(plan, 'expected plan message');
+    assert.ok(plan.actions?.some((action) => action.type === 'view_plan'));
+    assert.ok(!plan.actions?.some((action) => action.type === 'build'));
+  });
+
+  it('extracts planReview from composer toolbar when Build is outside the transcript', () => {
+    const state = withDom(`
+      <main id="root"></main>
+      <div id="composer-toolbar-section">
+        <button type="button">View Plan</button>
+        <button type="button">Build</button>
+      </div>
+    `);
+
+    assert.ok(state.planReview, 'expected planReview');
+    assert.match(state.planReview!.buildSelectorPath, /button/i);
+    assert.match(state.planReview!.viewPlanSelectorPath || '', /button/i);
+  });
+
+  it('extracts Build from composer toolbar when plan widget has no classed button', () => {
+    const state = withDom(`
+      <main id="root">
+        <div data-flat-index="1" data-message-role="ai" data-message-kind="tool">
+          <div class="composer-create-plan-container">
+            <div class="composer-create-plan-title">Auth System</div>
+            <div class="composer-create-plan-todo-item">
+              <div class="composer-create-plan-todo-content">Add login endpoint</div>
+            </div>
+          </div>
+        </div>
+      </main>
+      <div id="composer-toolbar-section">
+        <button type="button">Build</button>
+      </div>
+    `);
+
+    const plan = state.messages.find((message) => message.type === 'plan');
+    assert.ok(plan, 'expected plan message');
+    assert.ok(plan.actions?.some((action) => action.type === 'build'), 'expected Build action');
+  });
+
   it('still matches real Run approval buttons via textMatch fallback', () => {
     const state = withDom(
       `

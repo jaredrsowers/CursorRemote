@@ -9,6 +9,9 @@ import type { PlanBlock } from '../../types.js';
 import { cleanTabTitle } from '../../dom-extractor.js';
 import { normalizeWindowTitle } from './topic-manager.js';
 import { tgKeyboard, type BotContext, type TelegramApiClient } from './tg-types.js';
+import { ACTION_SELECTORS, resolveStableActionSelector } from '../../action-selectors.js';
+
+export { ACTION_SELECTORS, resolveStableActionSelector };
 
 export interface CommandDeps {
   api: TelegramApiClient;
@@ -1018,24 +1021,6 @@ export async function handleAgentCommand(ctx: BotContext, deps: CommandDeps): Pr
 //
 // Current (Cursor 3.4+) per-card layout selectors come from dom-extractor.ts;
 // legacy `.composer-*` selectors are kept as a second fallback for older Cursor.
-export const ACTION_SELECTORS: Record<string, string[]> = {
-  apr: ['button.ui-shell-tool-call__run-btn', '.composer-tool-call-status-row .anysphere-button.composer-run-button'],
-  rej: ['button.ui-shell-tool-call__skip-btn', '.composer-skip-button'],
-  all: ['button.ui-shell-tool-call__allowlist-button', '.composer-tool-call-status-row .anysphere-secondary-button.composer-run-button'],
-  run: ['button.ui-shell-tool-call__run-btn', '.composer-tool-call-status-row .anysphere-button.composer-run-button'],
-  skp: ['button.ui-shell-tool-call__skip-btn', '.composer-skip-button'],
-  alw: ['button.ui-shell-tool-call__allowlist-button', '.composer-tool-call-status-row .anysphere-secondary-button.composer-run-button'],
-  bld: ['.composer-create-plan-build-button'],
-};
-
-export function resolveStableActionSelector(action: string): string | undefined {
-  const candidates = ACTION_SELECTORS[action];
-  if (!candidates || candidates.length === 0) return undefined;
-  // Join into a single CSS selector list so `document.querySelector` picks the
-  // first one that matches anything in the live DOM.
-  return candidates.join(', ');
-}
-
 /**
  * Callback data is `action:<payload>` where `<payload>` shape depends on the
  * action. Several actions (notably `model`) carry ids that contain literal

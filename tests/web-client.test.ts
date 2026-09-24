@@ -256,6 +256,142 @@ describe('web: plan widget', () => {
     assert.ok(planEl, 'Should render plan block (.el-plan)');
     assert.match(planEl!.textContent!, /Auth System/);
   });
+
+  it('does not render Build button when plan has no build action', () => {
+    const fixture = loadFixture('plan-widget.jsonl');
+    const state = { ...fixture[1].state! };
+    const plan = state.messages.find((msg) => msg.type === 'plan');
+    assert.ok(plan);
+    plan.actions = plan.actions?.filter((action) => action.type === 'view_plan') || [];
+    state.planReview = null;
+    fireFullState(env.mockSocket, state);
+    const buildBtn = env.document.querySelector('.el-plan .plan-btn-build');
+    assert.equal(buildBtn, null, 'Should not render Build on plan card');
+    const reviewBar = env.document.getElementById('plan-review-bar');
+    assert.ok(reviewBar?.classList.contains('hidden'), 'Plan review bar should be hidden');
+    const viewBtn = env.document.querySelector('.plan-btn-view');
+    assert.ok(viewBtn, 'Should still render View Plan');
+  });
+
+  it('closes plan modal when Build is clicked inside the modal', () => {
+    const fixture = loadFixture('plan-widget.jsonl');
+    const plan = fixture[1].state!.messages.find((msg) => msg.type === 'plan');
+    assert.ok(plan);
+    fireFullState(env.mockSocket, fixture[1].state!);
+    const viewBtn = env.document.querySelector('.el-plan .plan-btn-view');
+    assert.ok(viewBtn, 'Should render View Plan on plan card');
+    viewBtn!.dispatchEvent(new env.window.MouseEvent('click', { bubbles: true }));
+    const overlay = env.document.getElementById('plan-modal-overlay')!;
+    assert.ok(!overlay.classList.contains('hidden'), 'Plan modal should open');
+    const modalBuild = env.document.querySelector('.plan-modal-body .plan-btn-build');
+    assert.ok(modalBuild, 'Should render Build in plan modal');
+    modalBuild!.dispatchEvent(new env.window.MouseEvent('click', { bubbles: true }));
+    assert.ok(overlay.classList.contains('hidden'), 'Plan modal should close after Build');
+  });
+
+  it('opens plan modal for View Plan instead of clicking stable:vpl in Cursor', () => {
+    const emitted: Array<{ event: string; payload: unknown }> = [];
+    env.mockSocket.emit = (event: string, payload?: unknown) => {
+      emitted.push({ event, payload });
+    };
+
+    const state = {
+      connected: true,
+      extractorStatus: 'ok',
+      agentStatus: 'idle',
+      messages: [
+        {
+          id: 'plan-1',
+          type: 'plan',
+          flatIndex: 0,
+          label: '',
+          title: 'Test Plan',
+          todosCompleted: 0,
+          todosTotal: 0,
+          description: 'A short plan overview for the modal.',
+          actions: [{ label: 'View Plan', type: 'view_plan', selectorPath: 'stable:vpl' }],
+        },
+      ],
+      pendingApprovals: [],
+      inputAvailable: true,
+      chatTabs: [],
+      mode: { current: 'agent', available: [] },
+      model: { current: 'Auto', currentId: '' },
+      windows: [],
+      activeWindowId: '',
+      composerQueue: { items: [] },
+      questionnaire: null,
+      planReview: null,
+    } as CursorState;
+
+    fireFullState(env.mockSocket, state);
+    const viewBtn = env.document.querySelector('.el-plan .plan-btn-view');
+    assert.ok(viewBtn, 'Should render View Plan when content is available');
+    viewBtn!.dispatchEvent(new env.window.MouseEvent('click', { bubbles: true }));
+
+    const overlay = env.document.getElementById('plan-modal-overlay')!;
+    assert.ok(!overlay.classList.contains('hidden'), 'Plan modal should open');
+    assert.equal(
+      emitted.some((entry) => entry.event === 'command:click_action'),
+      false,
+      'View Plan should not emit click_action'
+    );
+  });
+
+  it('hides View Plan when plan has no viewable content', () => {
+    const state = {
+      connected: true,
+      extractorStatus: 'ok',
+      agentStatus: 'idle',
+      messages: [
+        {
+          id: 'plan-empty',
+          type: 'plan',
+          flatIndex: 0,
+          label: '',
+          title: 'Plan',
+          todosCompleted: 0,
+          todosTotal: 0,
+          actions: [{ label: 'View Plan', type: 'view_plan', selectorPath: 'stable:vpl' }],
+        },
+      ],
+      pendingApprovals: [],
+      inputAvailable: true,
+      chatTabs: [],
+      mode: { current: 'agent', available: [] },
+      model: { current: 'Auto', currentId: '' },
+      windows: [],
+      activeWindowId: '',
+      composerQueue: { items: [] },
+      questionnaire: null,
+      planReview: null,
+    } as CursorState;
+
+    fireFullState(env.mockSocket, state);
+    const viewBtn = env.document.querySelector('.el-plan .plan-btn-view');
+    assert.equal(viewBtn, null, 'Should hide View Plan without label or inline content');
+  });
+
+  it('renders plan review bar when composer toolbar has Build', () => {
+    const fixture = loadFixture('plan-widget.jsonl');
+    const state = {
+      ...fixture[1].state!,
+      messages: [],
+      planReview: {
+        title: 'Say Hi',
+        label: 'say_hi.plan.md',
+        buildSelectorPath: 'stable:bld',
+        viewPlanSelectorPath: 'stable:vpl',
+      },
+    };
+    fireFullState(env.mockSocket, state);
+    const bar = env.document.getElementById('plan-review-bar');
+    assert.ok(bar, 'Should render plan review bar');
+    assert.ok(!bar!.classList.contains('hidden'));
+    assert.match(bar!.textContent!, /Say Hi/);
+    assert.ok(env.document.getElementById('btn-plan-build'));
+    assert.ok(env.document.getElementById('btn-plan-view'));
+  });
 });
 
 // ─── Code block rendering ───
@@ -387,6 +523,7 @@ describe('web: questionnaire widget', () => {
       activeWindowId: '',
       composerQueue: { items: [] },
       questionnaire: null,
+      planReview: null,
     };
   }
 

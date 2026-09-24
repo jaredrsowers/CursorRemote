@@ -1,4 +1,5 @@
 import type { CdpClient } from './cdp-client.js';
+import { resolveSelectorPath } from './action-selectors.js';
 import type { SelectorConfig, CommandResult, PlanModelOption } from './types.js';
 
 const MAX_RETRIES = 2;
@@ -648,9 +649,70 @@ export class CommandExecutor {
 
   async clickAction(commandId: string, selectorPath: string, expectedLabel?: string): Promise<CommandResult> {
     return this.withRetry(commandId, async (client) => {
+      const resolvedPath = resolveSelectorPath(selectorPath);
+      if (selectorPath.startsWith('stable:')) {
+        const label = expectedLabel ?? (selectorPath === 'stable:bld' ? 'Build' : selectorPath === 'stable:vpl' ? 'View Plan' : '');
+        const result = await client.evaluate(`
+          (() => {
+            const label = ${JSON.stringify(label)};
+            const selectorList = ${JSON.stringify(resolvedPath.split(',').map((s) => s.trim()).filter(Boolean))};
+            for (const sel of selectorList) {
+              try {
+                const el = document.querySelector(sel);
+                if (el) {
+                  const text = (el.textContent || el.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim();
+                  if (!label || text.toLowerCase() === label.toLowerCase()) {
+                    el.scrollIntoView({ block: 'center', behavior: 'instant' });
+                    el.click();
+                    return { ok: true };
+                  }
+                }
+              } catch {}
+            }
+            const scopes = [
+              ...Array.from(document.querySelectorAll('[class*="tool-call-card__body"]')).reverse(),
+              document.querySelector('.composer-create-plan-container'),
+              document.querySelector('#composer-toolbar-section'),
+              document.querySelector('#workbench\\\\.parts\\\\.auxiliarybar'),
+            ].filter(Boolean);
+            for (const scope of scopes) {
+              const viewBtn = Array.from(scope.querySelectorAll('button, [role="button"]')).find((btn) => {
+                const text = (btn.textContent || btn.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim();
+                return /^view plan$/i.test(text);
+              });
+              if (label.toLowerCase() === 'build' && viewBtn?.parentElement) {
+                const sibling = Array.from(viewBtn.parentElement.querySelectorAll('button, [role="button"]')).find(
+                  (btn) => btn !== viewBtn
+                );
+                if (sibling) {
+                  sibling.scrollIntoView({ block: 'center', behavior: 'instant' });
+                  sibling.click();
+                  return { ok: true };
+                }
+              }
+              for (const btn of Array.from(scope.querySelectorAll('button, [role="button"]'))) {
+                const text = (btn.textContent || btn.getAttribute('aria-label') || btn.getAttribute('title') || '')
+                  .replace(/\\s+/g, ' ').trim();
+                if (label && (text.toLowerCase() === label.toLowerCase() || (label.toLowerCase() === 'build' && /build/i.test(text)))) {
+                  btn.scrollIntoView({ block: 'center', behavior: 'instant' });
+                  btn.click();
+                  return { ok: true };
+                }
+              }
+            }
+            return { ok: false, error: label ? ('Plan action button not found: ' + label) : 'Plan action button not found' };
+          })()
+        `) as { ok: boolean; error?: string } | null;
+        if (!result?.ok) {
+          throw new Error(result?.error ?? 'Plan action button not found');
+        }
+        console.log(`[command-executor] Clicked stable plan action: ${label || selectorPath}`);
+        return;
+      }
+
       if (expectedLabel === undefined) {
-        await client.click(selectorPath);
-        console.log(`[command-executor] Clicked action: ${selectorPath.substring(0, 60)}`);
+        await client.click(resolvedPath);
+        console.log(`[command-executor] Clicked action: ${resolvedPath.substring(0, 60)}`);
         return;
       }
 
@@ -658,7 +720,7 @@ export class CommandExecutor {
         (() => {
           ${ACTION_CLICK_RESOLVER_JS}
 
-          const selectorPath = ${JSON.stringify(selectorPath)};
+          const selectorPath = ${JSON.stringify(resolvedPath)};
           const expectedLabel = ${JSON.stringify(expectedLabel)};
           const target = resolveActionClickTarget(document, selectorPath, expectedLabel);
           if (!target.element) return { ok: false, error: target.error };
