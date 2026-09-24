@@ -179,8 +179,30 @@ export type ActionClickTargetResult = { element: Element } | { error: string };
 
 const ACTION_BUTTON_SELECTOR = 'button, [role="button"], [class*="ui-button"], [data-click-ready]';
 
+// Keep in sync with dom-extractor cleanBtnLabel and ACTION_CLICK_RESOLVER_JS below.
+export function cleanActionLabel(raw: string | null | undefined): string {
+  return (raw ?? '')
+    .replace(/\u2318.*$/g, '')
+    .replace(/(ctrl|shift|alt|cmd)\+[\s\S]*$/gi, '')
+    .replace(/\s*(Shift\+)?⏎\s*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function normalizeActionLabel(value: string | null | undefined): string {
-  return (value ?? '').trim().toLowerCase();
+  return cleanActionLabel(value).toLowerCase();
+}
+
+function actionButtonLabels(element: Element): string[] {
+  const labels: string[] = [];
+  const truncatedLabel = element.querySelector('span.truncate');
+  if (truncatedLabel) labels.push(cleanActionLabel(truncatedLabel.textContent));
+  labels.push(cleanActionLabel(element.textContent));
+  const aria = element.getAttribute('aria-label');
+  if (aria) labels.push(cleanActionLabel(aria));
+  const title = element.getAttribute('title');
+  if (title) labels.push(cleanActionLabel(title));
+  return labels.filter(Boolean);
 }
 
 function elementLabelMatches(element: Element, expectedLabel: string): boolean {
@@ -195,11 +217,8 @@ function elementLabelMatches(element: Element, expectedLabel: string): boolean {
   if (element.classList.contains('composer-questionnaire-toolbar-option-freeform')) {
     return normalizeActionLabel(expectedLabel) === 'other';
   }
-  const truncatedLabel = element.querySelector('span.truncate');
-  if (truncatedLabel) {
-    return normalizeActionLabel(truncatedLabel.textContent) === normalizeActionLabel(expectedLabel);
-  }
-  return normalizeActionLabel(element.textContent) === normalizeActionLabel(expectedLabel);
+  const expected = normalizeActionLabel(expectedLabel);
+  return actionButtonLabels(element).some((label) => normalizeActionLabel(label) === expected);
 }
 
 function isElementRoot(root: Document | Element): root is Element {
@@ -271,7 +290,26 @@ export function resolveActionClickTarget(
 export const ACTION_CLICK_RESOLVER_JS = `
   const ACTION_BUTTON_SELECTOR = 'button, [role="button"], [class*="ui-button"], [data-click-ready]';
 
-  const normalizeActionLabel = (value) => (value || '').trim().toLowerCase();
+  const cleanActionLabel = (raw) => (raw || '')
+    .replace(/\\u2318.*$/g, '')
+    .replace(/(ctrl|shift|alt|cmd)\\+[\\s\\S]*$/gi, '')
+    .replace(/\\s*(Shift\\+)?⏎\\s*/g, '')
+    .replace(/\\s+/g, ' ')
+    .trim();
+
+  const normalizeActionLabel = (value) => cleanActionLabel(value).toLowerCase();
+
+  const actionButtonLabels = (element) => {
+    const labels = [];
+    const truncatedLabel = element.querySelector('span.truncate');
+    if (truncatedLabel) labels.push(cleanActionLabel(truncatedLabel.textContent));
+    labels.push(cleanActionLabel(element.textContent));
+    const aria = element.getAttribute('aria-label');
+    if (aria) labels.push(cleanActionLabel(aria));
+    const title = element.getAttribute('title');
+    if (title) labels.push(cleanActionLabel(title));
+    return labels.filter(Boolean);
+  };
 
   const elementLabelMatches = (element, expectedLabel) => {
     const optionLabel = element.querySelector('.composer-questionnaire-toolbar-option-label');
@@ -281,11 +319,8 @@ export const ACTION_CLICK_RESOLVER_JS = `
     if (element.classList.contains('composer-questionnaire-toolbar-option-freeform')) {
       return normalizeActionLabel(expectedLabel) === 'other';
     }
-    const truncatedLabel = element.querySelector('span.truncate');
-    if (truncatedLabel) {
-      return normalizeActionLabel(truncatedLabel.textContent) === normalizeActionLabel(expectedLabel);
-    }
-    return normalizeActionLabel(element.textContent) === normalizeActionLabel(expectedLabel);
+    const expected = normalizeActionLabel(expectedLabel);
+    return actionButtonLabels(element).some((label) => normalizeActionLabel(label) === expected);
   };
 
   const queryWithin = (root, selector) => {

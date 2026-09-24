@@ -57,6 +57,23 @@ describe('action click target resolution', () => {
     assert.equal(assertElement(result).id, 'skip');
   });
 
+  it('matches Build when button text includes glued keyboard shortcut (BuildCtrl+⏎)', () => {
+    const document = documentFor(`
+      <main id="toolbar">
+        <button id="stale">Not Build</button>
+        <button id="target" class="ui-button">BuildCtrl+⏎</button>
+      </main>
+    `);
+
+    const result = resolveActionClickTarget(
+      document,
+      '#toolbar > button#stale',
+      'Build'
+    );
+
+    assert.equal(assertElement(result).id, 'target');
+  });
+
   it('falls back to exactly one scoped text match when the selector label mismatches', () => {
     const document = documentFor(`
       <main id="toolbar">
