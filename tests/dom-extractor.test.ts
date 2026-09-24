@@ -4,7 +4,10 @@ import { JSDOM } from 'jsdom';
 import { extractionFunction } from '../src/server/dom-extractor.js';
 import type { CursorState } from '../src/server/types.js';
 
-function withDom(html: string): CursorState {
+function withDom(
+  html: string,
+  options: { approveTextMatch?: string[]; rejectTextMatch?: string[] } = {}
+): CursorState {
   const dom = new JSDOM(html);
   const documentDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'document');
   const nodeDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'Node');
@@ -20,8 +23,9 @@ function withDom(html: string): CursorState {
     const state = extractionFunction(
       ['#root'],
       [],
+      options.approveTextMatch ?? [],
       [],
-      [],
+      options.rejectTextMatch ?? [],
       [],
       [],
       [],
@@ -137,6 +141,35 @@ describe('extractionFunction', () => {
       question.options[1].selectorPath,
       '.composer-questionnaire-toolbar-question:nth-of-type(1) .composer-questionnaire-toolbar-option:nth-of-type(2)'
     );
+  });
+
+  it('does not treat terminal log buttons as approvals when text contains "running"', () => {
+    const state = withDom(
+      `
+      <main id="root">
+        <button>[20] pipeline=2880520367 status=running sha=c5c1e851
+[21] pipeline=2880520367 status=running sha=c5c1e851</button>
+      </main>
+    `,
+      { approveTextMatch: ['Accept', 'Approve', 'Run', 'Allow', 'Accept All'] }
+    );
+
+    assert.equal(state.pendingApprovals.length, 0);
+    assert.notEqual(state.agentStatus, 'waiting_approval');
+  });
+
+  it('still matches real Run approval buttons via textMatch fallback', () => {
+    const state = withDom(
+      `
+      <main id="root">
+        <button>Run</button>
+      </main>
+    `,
+      { approveTextMatch: ['Run'] }
+    );
+
+    assert.equal(state.pendingApprovals.length, 1);
+    assert.equal(state.pendingApprovals[0].description, 'Run');
   });
 
   it('keeps buildSelectorPath selectors for legacy questionnaire actions', () => {

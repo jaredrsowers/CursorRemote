@@ -1248,6 +1248,25 @@ export function extractionFunction(
     };
     const cleanBtnLabel = (raw: string): string =>
       raw.replace(/\s*(Shift\+)?⏎\s*/g, '').replace(/\s+/g, ' ').trim();
+    const buttonLabelMatchesPattern = (label: string, pattern: string): boolean => {
+      const normalizedLabel = label.replace(/\s+/g, ' ').trim();
+      const normalizedPattern = pattern.replace(/\s+/g, ' ').trim();
+      if (!normalizedLabel || !normalizedPattern) return false;
+      if (normalizedPattern.includes(' ')) {
+        return normalizedLabel.toLowerCase().includes(normalizedPattern.toLowerCase());
+      }
+      const escaped = normalizedPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(`\\b${escaped}\\b`, 'i').test(normalizedLabel);
+    };
+    const isPlausibleApprovalButton = (btn: Element): boolean => {
+      const raw = (btn.textContent || '').trim();
+      const aria = (btn.getAttribute('aria-label') || '').trim();
+      const label = cleanBtnLabel(raw || aria);
+      if (!label) return false;
+      if (raw.includes('\n')) return false;
+      if (label.length > 80) return false;
+      return true;
+    };
 
     const seenCards = new Set<Element>();
     const approvalRows = container.querySelectorAll('.ui-shell-tool-call__approval-row');
@@ -1328,12 +1347,14 @@ export function extractionFunction(
       }
       if (approveButtons.length === 0 && approveTextMatch.length > 0) {
         for (const btn of Array.from(container.querySelectorAll('button'))) {
-          if (seenApproveBtns.has(btn) || isMenuTrigger(btn)) continue;
-          const text = `${btn.textContent?.trim() || ''} ${btn.getAttribute('aria-label') || ''}`.toLowerCase();
+          if (seenApproveBtns.has(btn) || isMenuTrigger(btn) || !isPlausibleApprovalButton(btn)) continue;
+          const label = cleanBtnLabel(
+            `${btn.textContent?.trim() || ''} ${btn.getAttribute('aria-label') || ''}`.trim()
+          );
           for (const pat of approveTextMatch) {
-            if (text.includes(pat.toLowerCase())) {
+            if (buttonLabelMatchesPattern(label, pat)) {
               seenApproveBtns.add(btn);
-              approveButtons.push({ label: btn.textContent?.trim() || pat, selector: buildSelectorPath(btn) });
+              approveButtons.push({ label, selector: buildSelectorPath(btn) });
               break;
             }
           }
@@ -1355,12 +1376,14 @@ export function extractionFunction(
       }
       if (rejectButtons.length === 0 && rejectTextMatch.length > 0) {
         for (const btn of Array.from(container.querySelectorAll('button'))) {
-          if (seenRejectBtns.has(btn) || isMenuTrigger(btn)) continue;
-          const text = `${btn.textContent?.trim() || ''} ${btn.getAttribute('aria-label') || ''}`.toLowerCase();
+          if (seenRejectBtns.has(btn) || isMenuTrigger(btn) || !isPlausibleApprovalButton(btn)) continue;
+          const label = cleanBtnLabel(
+            `${btn.textContent?.trim() || ''} ${btn.getAttribute('aria-label') || ''}`.trim()
+          );
           for (const pat of rejectTextMatch) {
-            if (text.includes(pat.toLowerCase())) {
+            if (buttonLabelMatchesPattern(label, pat)) {
               seenRejectBtns.add(btn);
-              rejectButtons.push({ label: btn.textContent?.trim() || pat, selector: buildSelectorPath(btn) });
+              rejectButtons.push({ label, selector: buildSelectorPath(btn) });
               break;
             }
           }
