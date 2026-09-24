@@ -323,7 +323,7 @@ export interface SelectorConfig {
 
 export interface CommandPayload {
   commandId: string;
-  type: 'send_message' | 'approve' | 'reject' | 'approve_all' | 'switch_tab' | 'new_chat' | 'set_mode' | 'set_model' | 'click_action' | 'get_plan_full' | 'get_plan_model_options' | 'set_plan_model';
+  type: 'send_message' | 'approve' | 'reject' | 'approve_all' | 'switch_tab' | 'new_chat' | 'set_mode' | 'set_model' | 'set_model_fast' | 'click_action' | 'get_plan_full' | 'get_plan_model_options' | 'set_plan_model';
   text?: string;
   approvalId?: string;
   actionType?: string;
@@ -332,6 +332,7 @@ export interface CommandPayload {
   composerId?: string;
   modeId?: string;
   modelId?: string;
+  modelFastEnabled?: boolean;
   planLabel?: string;
   planTitle?: string;
   planDescription?: string;

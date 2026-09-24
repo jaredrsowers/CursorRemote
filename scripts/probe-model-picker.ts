@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { loadConfig } from '../src/server/config.js';
+import { MODEL_MENU_LOOKUP_JS, MODEL_ITEM_HELPERS_JS } from '../src/server/command-executor.js';
 
 interface CDPTarget {
   id: string;
@@ -10,11 +11,16 @@ interface CDPTarget {
 }
 
 // Opens the Cursor model picker via the new + legacy trigger selectors,
-// then dumps the resulting menu (and its child rows) so we can confirm the
-// selectors used inside command-executor.ts still work on the current Cursor.
+// navigates into the Model submenu when needed, then dumps model rows.
 //
 // Usage: npm run discover -- model-picker
 // or:    npx tsx scripts/probe-model-picker.ts [--window <substring>]
+
+const TRIGGER_SELECTORS = [
+  '.composer-bar-input-buttons button[aria-haspopup="menu"]',
+  '.ui-model-picker__trigger',
+  '.composer-unified-dropdown-model',
+];
 
 async function main() {
   const args = process.argv.slice(2);
@@ -39,31 +45,35 @@ async function main() {
   const client = new CdpClient();
   await client.connect(target.webSocketDebuggerUrl!);
 
-  // Step 1: report which trigger selectors match before opening.
   const triggerReport = await client.evaluate(`
     (() => {
       const out = {};
-      for (const sel of ['.ui-model-picker__trigger', '.composer-unified-dropdown-model']) {
+      for (const sel of ${JSON.stringify(TRIGGER_SELECTORS)}) {
         const els = document.querySelectorAll(sel);
         out[sel] = {
           count: els.length,
           first: els[0] ? (els[0].outerHTML || '').slice(0, 400) : null,
+          text: els[0] ? (els[0].textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 60) : null,
           ariaControls: els[0] ? els[0].getAttribute('aria-controls') : null,
           ariaExpanded: els[0] ? els[0].getAttribute('aria-expanded') : null,
         };
       }
       return out;
     })()
-  `) as Record<string, { count: number; first: string | null; ariaControls: string | null; ariaExpanded: string | null }>;
+  `) as Record<string, { count: number; first: string | null; text: string | null; ariaControls: string | null; ariaExpanded: string | null }>;
   console.log('\n--- Trigger selectors (before click) ---');
   console.log(JSON.stringify(triggerReport, null, 2));
 
-  // Step 2: click the first matching trigger.
   const clicked = await client.evaluate(`
     (() => {
-      for (const sel of ['.ui-model-picker__trigger', '.composer-unified-dropdown-model']) {
-        const el = document.querySelector(sel);
-        if (el) { el.click(); return sel; }
+      for (const sel of ${JSON.stringify(TRIGGER_SELECTORS)}) {
+        const els = document.querySelectorAll(sel);
+        for (const el of Array.from(els)) {
+          const cId = el.getAttribute('id') || '';
+          if (cId.startsWith('plan-exec-model')) continue;
+          el.click();
+          return sel;
+        }
       }
       return null;
     })()
@@ -75,48 +85,35 @@ async function main() {
 
   await new Promise((r) => setTimeout(r, 400));
 
-  // Step 3: report what the menu looks like now.
+  const submenuOpened = await client.evaluate(`
+    (() => {
+      ${MODEL_MENU_LOOKUP_JS}
+      if (findModelSelectionMenu()) return 'already-open';
+      return openModelSubmenuIfNeeded() ? 'opened-submenu' : 'no-submenu';
+    })()
+  `) as string;
+  console.log(`\nModel submenu: ${submenuOpened}`);
+  await new Promise((r) => setTimeout(r, 400));
+
   const menuReport = await client.evaluate(`
     (() => {
-      const out = {};
-      out.byTestId = !!document.querySelector('[data-testid="model-picker-menu"]');
-      const trigger = document.querySelector(
-        '.ui-model-picker__trigger[aria-expanded="true"],.composer-unified-dropdown-model[aria-expanded="true"]'
-      );
-      out.ariaControls = trigger ? trigger.getAttribute('aria-controls') : null;
-      out.menuByControls = (() => {
-        if (!out.ariaControls) return null;
-        const el = document.getElementById(out.ariaControls);
-        return el ? { tag: el.tagName, role: el.getAttribute('role'), childCount: el.children.length, outer: (el.outerHTML || '').slice(0, 600) } : null;
-      })();
-      const openMenu = document.querySelector('[role="menu"][data-state="open"]')
-        || document.querySelector('[role="menu"]:not([hidden])');
-      out.firstOpenMenu = openMenu ? {
-        tag: openMenu.tagName,
-        role: openMenu.getAttribute('role'),
-        dataState: openMenu.getAttribute('data-state'),
-        childCount: openMenu.children.length,
-      } : null;
-      const itemsSel = '[id], [role="menuitem"], button, [data-testid]';
-      const items = openMenu ? Array.from(openMenu.querySelectorAll(itemsSel)) : [];
-      out.itemSample = items.slice(0, 12).map((it) => ({
-        tag: it.tagName,
-        id: it.id || '',
-        role: it.getAttribute('role'),
-        testid: it.getAttribute('data-testid'),
-        text: (it.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 80),
-      }));
+      ${MODEL_MENU_LOOKUP_JS}
+      ${MODEL_ITEM_HELPERS_JS}
+      const menu = findModelMenu();
+      const out = {
+        menuFound: !!menu,
+        menuLabel: menu ? menu.getAttribute('aria-label') : null,
+        options: menu ? collectModelItems(menu) : [],
+      };
       return out;
     })()
-  `);
-  console.log('\n--- Menu after click ---');
+  `) as { menuFound: boolean; menuLabel: string | null; options: Array<{ id: string; label: string; selected: boolean }> };
+  console.log('\n--- Model selection menu ---');
   console.log(JSON.stringify(menuReport, null, 2));
 
-  // Step 4: close the menu.
   await client.pressKey('Escape', 'Escape', 27);
-
   await client.disconnect();
-  console.log('\n[probe-model-picker] done. Paste this report into issue #22 to confirm the fix.');
+  console.log('\n[probe-model-picker] done.');
 }
 
 main().catch((err) => {

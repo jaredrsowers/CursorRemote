@@ -1858,16 +1858,17 @@
     } else if (type === 'model') {
       $sheetModel.classList.remove('hidden');
       if (cachedModelOptions) {
-        renderModelSheet(cachedModelOptions);
+        renderModelSheet(cachedModelOptions, cachedModelFast);
       } else {
         renderModelSheetLoading();
       }
-      fetchModelOptions().then(options => {
+      fetchModelOptions().then(result => {
         if (activeSheet !== 'model') return;
-        if (options) {
-          renderModelSheet(options);
+        if (result.ok && result.options) {
+          renderModelSheet(result.options, result.fast);
         } else if (!cachedModelOptions) {
           renderModelSheet(null);
+          if (!result.ok) showToast(result.error || 'Could not load models', 'error');
         }
       });
     } else if (type === 'plan-model') {
@@ -1911,6 +1912,7 @@
   }
 
   let cachedModelOptions = null;
+  let cachedModelFast = null;
 
   async function fetchModelOptions() {
     const commandId = newCommandId();
@@ -1920,13 +1922,47 @@
     });
     if (result.ok && Array.isArray(result.data?.options)) {
       cachedModelOptions = result.data.options;
-      return result.data.options;
+      cachedModelFast = result.data.fast ?? null;
+      return { ok: true, options: result.data.options, fast: cachedModelFast };
     }
-    return null;
+    return { ok: false, error: result.error || 'Could not load models' };
   }
 
-  function renderModelSheet(options) {
+  function renderModelSheet(options, fast) {
     $sheetModelList.innerHTML = '';
+
+    if (fast !== null && fast !== undefined) {
+      const toggleRow = document.createElement('div');
+      toggleRow.className = 'sheet-toggle';
+      const label = document.createElement('span');
+      label.textContent = 'Fast';
+      toggleRow.appendChild(label);
+      const toggleBtn = document.createElement('button');
+      toggleBtn.type = 'button';
+      toggleBtn.className = 'toggle-switch' + (fast ? ' on' : '');
+      toggleBtn.setAttribute('aria-label', 'Fast mode');
+      toggleBtn.innerHTML = '<span class="toggle-knob"></span>';
+      toggleBtn.addEventListener('click', async () => {
+        const next = !fast;
+        const result = await sendCommandAwaitResult('command:set_model_fast', {
+          commandId: newCommandId(),
+          type: 'set_model_fast',
+          modelFastEnabled: next,
+        });
+        if (!result.ok) {
+          showToast(result.error || 'Could not toggle Fast', 'error');
+          return;
+        }
+        cachedModelFast = next;
+        renderModelSheet(cachedModelOptions, cachedModelFast);
+        showToast(`Fast: ${next ? 'On' : 'Off'}`, 'success');
+      });
+      toggleRow.appendChild(toggleBtn);
+      $sheetModelList.appendChild(toggleRow);
+      const divider = document.createElement('div');
+      divider.className = 'sheet-divider';
+      $sheetModelList.appendChild(divider);
+    }
 
     if (!options || options.length === 0) {
       const empty = document.createElement('div');

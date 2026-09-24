@@ -10,7 +10,8 @@ const FOCUS_DELAY_MS = 100;
 const MESSAGE_WRAPPER_SELECTOR = '[data-message-index], [data-flat-index]';
 
 // Resolves the currently-open model picker menu element across Cursor versions.
-// Older builds expose `[data-testid="model-picker-menu"]`; newer builds (~3.5.17)
+// Cursor 3.8+ nests models under parameters → Model submenu (`aria-label="Model
+// selection"`). Older builds expose `[data-testid="model-picker-menu"]`; ~3.5.17
 // removed the testid and render the picker as a generic `[role="menu"]` opened
 // via `.ui-model-picker__trigger`, so we cascade through several lookups.
 // Stable across model-picker renders — Cursor's React 19 useId-generated IDs
@@ -27,19 +28,34 @@ const REACT_USE_ID_RE = /^_r_[a-z0-9]+_$/;
 // row." Inject as `${MODEL_ITEM_HELPERS_JS}` inside an evaluate().
 export const MODEL_ITEM_HELPERS_JS = `
   const REACT_USE_ID_RE = ${REACT_USE_ID_RE.toString()};
+  const REACT_MENU_ITEM_ID_RE = /^_r_[a-z0-9]+_-item-\\d+$/;
+
+  const cleanModelLabel = (text) =>
+    (text || '').replace(/\\s*new\\s*$/i, '').replace(/\\s+/g, ' ').trim();
 
   // Row label, excluding text from descendant <button> elements (each row has
   // an inner "Edit" button whose text would otherwise pollute the label).
   const labelOf = (el) => {
     const clone = el.cloneNode(true);
     for (const b of Array.from(clone.querySelectorAll('button'))) b.remove();
-    return (clone.textContent || '').replace(/\\s+/g, ' ').trim();
+    return cleanModelLabel(clone.textContent || '');
   };
 
-  // Returns the DOM id only if it's stable; React useId values round-trip badly.
+  const isModelSelectionMenu = (menu) => {
+    if (!menu) return false;
+    const label = menu.getAttribute?.('aria-label') || '';
+    if (label === 'Model selection') return true;
+    return !!menu.querySelector?.('[data-testid^="model-item-"], [data-testid="auto-mode-select"]');
+  };
+
+  // Returns a stable row id when available; React useId values round-trip badly.
   const stableIdOf = (el) => {
+    const testId = el.getAttribute?.('data-testid') || '';
+    if (testId && (testId.startsWith('model-item-') || testId === 'auto-mode-select')) {
+      return testId;
+    }
     const raw = el.id || '';
-    if (!raw || REACT_USE_ID_RE.test(raw)) return '';
+    if (!raw || REACT_USE_ID_RE.test(raw) || REACT_MENU_ITEM_ID_RE.test(raw)) return '';
     return raw;
   };
 
@@ -47,6 +63,9 @@ export const MODEL_ITEM_HELPERS_JS = `
   // candidate so per-row Edit buttons don't show up as separate "models."
   const modelRowsIn = (menu) => {
     if (!menu) return [];
+    if (isModelSelectionMenu(menu)) {
+      return Array.from(menu.querySelectorAll('[data-component="menu-row"]'));
+    }
     const raw = Array.from(menu.querySelectorAll('[id], [role="menuitem"], button, [data-testid]'));
     return raw.filter(item => !raw.some(other => other !== item && other.contains(item)));
   };
@@ -63,9 +82,7 @@ export const MODEL_ITEM_HELPERS_JS = `
     for (const item of items) {
       const label = labelOf(item);
       if (!label) continue;
-      // Skip pure action-button entries that survived the nesting filter
-      // (defensive — e.g. floating Edit/Configure buttons not inside a row).
-      if (/^(edit|configure|remove|delete|star)$/i.test(label)) continue;
+      if (/^(edit|configure|remove|delete|star|add models|fast)$/i.test(label)) continue;
       const stableId = stableIdOf(item);
       const key = stableId || label.toLowerCase();
       if (seen.has(key)) continue;
@@ -73,7 +90,9 @@ export const MODEL_ITEM_HELPERS_JS = `
       const clickable = item.querySelector('.composer-unified-context-menu-item') || item;
       const cls = clickable.className || item.className || '';
       const aria = clickable.getAttribute?.('aria-checked') || item.getAttribute?.('aria-checked') || '';
-      const selected = /selected|active|checked/.test(cls) || aria === 'true';
+      const selected = isModelSelectionMenu(menu)
+        ? !!item.querySelector('.ui-icon')
+        : /selected|active|checked/.test(cls) || aria === 'true';
       out.push({
         id: stableId || ('label::' + label),
         label,
@@ -84,18 +103,22 @@ export const MODEL_ITEM_HELPERS_JS = `
   };
 
   // Finds and clicks the row whose id (or synthesized label::id) matches the
-  // requested target. Targets can be: a real DOM id ("model-opus"), a
-  // synthesized "label::<text>" (when the row has no stable id), an unstable
-  // React useId ("_r_ld_"), or the bare label text. Returns true on success.
+  // requested target. Targets can be: data-testid, DOM id, label::text,
+  // unstable React useId, or bare label text. Returns true on success.
   const pickModelById = (menu, targetId) => {
     if (!menu || !targetId) return false;
     const isLabelId = targetId.startsWith('label::');
-    const isUnstable = REACT_USE_ID_RE.test(targetId);
+    const isUnstable = REACT_USE_ID_RE.test(targetId) || REACT_MENU_ITEM_ID_RE.test(targetId);
     const labelTarget = (isLabelId ? targetId.slice(7) : '').trim().toLowerCase();
     const targetLc = targetId.toLowerCase();
     const fuzzy = (isLabelId || isUnstable) ? '' : targetLc.replace(/[-_]/g, ' ');
 
     if (!isLabelId && !isUnstable) {
+      const byTestId = menu.querySelector('[data-testid="' + targetId + '"]');
+      if (byTestId) {
+        clickModelRow(byTestId);
+        return true;
+      }
       const byId = document.getElementById(targetId);
       if (byId && (byId === menu || menu.contains(byId))) {
         clickModelRow(byId);
@@ -104,7 +127,6 @@ export const MODEL_ITEM_HELPERS_JS = `
     }
 
     const rows = modelRowsIn(menu);
-    // Pass 1: exact match (preferred — avoids "GPT-5" matching "GPT-5.5").
     for (const item of rows) {
       const label = labelOf(item);
       if (!label) continue;
@@ -115,17 +137,11 @@ export const MODEL_ITEM_HELPERS_JS = `
           clickModelRow(item);
           return true;
         }
-      } else {
-        if (stableId === targetId || ('label::' + label) === targetId) {
-          clickModelRow(item);
-          return true;
-        }
+      } else if (stableId === targetId || ('label::' + label) === targetId) {
+        clickModelRow(item);
+        return true;
       }
     }
-    // Pass 2: fuzzy/substring fallback for label::-style targets, in case the
-    // live row has extra text (e.g. a "Premium" badge, subtitle) beyond what
-    // collectModelItems captured. Guarded by length to avoid partial matches
-    // like "GPT-5" matching "GPT-5.5".
     for (const item of rows) {
       const label = labelOf(item);
       if (!label) continue;
@@ -149,13 +165,65 @@ export const MODEL_ITEM_COLLECTOR_JS = MODEL_ITEM_HELPERS_JS;
 
 // Inject as `${MODEL_MENU_LOOKUP_JS}` inside an evaluate; call `findModelMenu()`.
 export const MODEL_MENU_LOOKUP_JS = `
+  const findModelSelectionMenu = () => {
+    const byLabel = document.querySelector('[aria-label="Model selection"]');
+    if (byLabel) return byLabel;
+    const menus = document.querySelectorAll('[role="menu"]');
+    for (const menu of Array.from(menus)) {
+      if (menu.querySelector('[data-testid^="model-item-"], [data-testid="auto-mode-select"]')) {
+        return menu;
+      }
+    }
+    return null;
+  };
+
+  const openModelSubmenuIfNeeded = () => {
+    if (findModelSelectionMenu()) return true;
+    const triggers = document.querySelectorAll('[data-component="menu-submenu-trigger"]');
+    for (const trigger of Array.from(triggers)) {
+      const label = (trigger.textContent || '').replace(/\\s+/g, ' ').trim();
+      if (/^model/i.test(label)) {
+        trigger.click();
+        return findModelSelectionMenu() !== null;
+      }
+    }
+    return false;
+  };
+
+  const findFastToggleRow = () => {
+    const rows = document.querySelectorAll('[data-component="menu-toggle-row"]');
+    for (const row of Array.from(rows)) {
+      const text = (row.textContent || '').replace(/\\s+/g, ' ').trim();
+      if (/^fast$/i.test(text)) return row;
+    }
+    return null;
+  };
+
+  const readModelFastEnabled = () => {
+    const row = findFastToggleRow();
+    if (!row) return null;
+    return row.getAttribute('aria-checked') === 'true';
+  };
+
+  const setModelFastEnabled = (enabled) => {
+    const row = findFastToggleRow();
+    if (!row) return false;
+    const current = row.getAttribute('aria-checked') === 'true';
+    if (current === enabled) return true;
+    row.click();
+    return true;
+  };
+
   const findModelMenu = () => {
+    const selectionMenu = findModelSelectionMenu();
+    if (selectionMenu) return selectionMenu;
     const byTestId = document.querySelector('[data-testid="model-picker-menu"]');
     if (byTestId) return byTestId;
     const triggers = document.querySelectorAll(
       '.ui-model-picker__trigger[aria-expanded="true"],' +
       '.composer-unified-dropdown-model[aria-expanded="true"],' +
-      '.composer-unified-dropdown[aria-expanded="true"]'
+      '.composer-unified-dropdown[aria-expanded="true"],' +
+      '.composer-bar-input-buttons button[aria-haspopup="menu"][aria-expanded="true"]'
     );
     for (const t of Array.from(triggers)) {
       const controls = t.getAttribute('aria-controls');
@@ -908,43 +976,27 @@ export class CommandExecutor {
     return result;
   }
 
-  async setModel(commandId: string, modelId: string): Promise<CommandResult> {
+  async setModelFast(commandId: string, enabled: boolean): Promise<CommandResult> {
     return this.withRetry(commandId, async (client) => {
-      const strategies = this.selectors.modelDropdown?.strategies ?? [];
-
-      // Step 1: Open the dropdown via JS .click() (same pattern as setMode).
-      // Skip any trigger whose id starts with `plan-exec-model` (those belong
-      // to the plan-execution picker, not the composer's model picker) — same
-      // filter as openModelMenuAndReadOptions.
-      const opened = await client.evaluate(`
-        (() => {
-          const strategies = ${JSON.stringify(strategies)};
-          for (const sel of strategies) {
-            try {
-              const candidates = document.querySelectorAll(sel);
-              for (const c of Array.from(candidates)) {
-                const cId = c.getAttribute('id') || '';
-                if (cId.startsWith('plan-exec-model')) continue;
-                c.click();
-                return true;
-              }
-            } catch {}
-          }
-          return false;
-        })()
-      `) as boolean;
-      if (!opened) throw new Error('Model dropdown trigger not found');
-
+      await this.openComposerModelTrigger(client);
       await sleep(300);
-
-      // Step 2: Verify menu opened
-      const menuVisible = await client.evaluate(`
+      const toggled = await client.evaluate(`
         (() => {
           ${MODEL_MENU_LOOKUP_JS}
-          return findModelMenu() !== null;
+          return setModelFastEnabled(${JSON.stringify(enabled)});
         })()
       `) as boolean;
-      if (!menuVisible) throw new Error('Model picker did not open');
+      if (!toggled) throw new Error('Fast toggle not found');
+      await sleep(200);
+      await client.pressKey('Escape', 'Escape', 27);
+      await sleep(100);
+      console.log(`[command-executor] Model Fast set to: ${enabled}`);
+    });
+  }
+
+  async setModel(commandId: string, modelId: string): Promise<CommandResult> {
+    return this.withRetry(commandId, async (client) => {
+      await this.openComposerModelSelectionMenu(client);
 
       // Step 3: Find and click the model item via the shared helper so
       // setModel, setPlanModel, web client, and Telegram all resolve the
@@ -1088,6 +1140,7 @@ export class CommandExecutor {
     if (!opened) throw new Error('Plan model dropdown trigger not found');
 
     await sleep(300);
+    await this.openModelSubmenu(client);
     const menuVisible = await client.evaluate(`
       (() => {
         ${MODEL_MENU_LOOKUP_JS}
@@ -1116,11 +1169,8 @@ export class CommandExecutor {
     return { options };
   }
 
-  private async openModelMenuAndReadOptions(
-    client: CdpClient
-  ): Promise<{ options: PlanModelOption[] }> {
+  private async openComposerModelTrigger(client: CdpClient): Promise<void> {
     const strategies = this.selectors.modelDropdown?.strategies ?? [];
-
     const opened = await client.evaluate(`
       (() => {
         const strategies = ${JSON.stringify(strategies)};
@@ -1129,10 +1179,9 @@ export class CommandExecutor {
             const candidates = document.querySelectorAll(sel);
             for (const c of Array.from(candidates)) {
               const cId = c.getAttribute('id') || '';
-              if (!cId.startsWith('plan-exec-model')) {
-                c.click();
-                return true;
-              }
+              if (cId.startsWith('plan-exec-model')) continue;
+              c.click();
+              return true;
             }
           } catch {}
         }
@@ -1140,9 +1189,46 @@ export class CommandExecutor {
       })()
     `) as boolean;
     if (!opened) throw new Error('Model dropdown trigger not found');
+  }
 
+  private async openComposerModelSelectionMenu(client: CdpClient): Promise<void> {
+    await this.openComposerModelTrigger(client);
+    await sleep(300);
+    await this.openModelSubmenu(client);
+    const menuVisible = await client.evaluate(`
+      (() => {
+        ${MODEL_MENU_LOOKUP_JS}
+        return findModelMenu() !== null;
+      })()
+    `) as boolean;
+    if (!menuVisible) throw new Error('Model picker did not open');
+  }
+
+  private async openModelSubmenu(client: CdpClient): Promise<void> {
+    const opened = await client.evaluate(`
+      (() => {
+        ${MODEL_MENU_LOOKUP_JS}
+        if (findModelSelectionMenu()) return true;
+        return openModelSubmenuIfNeeded();
+      })()
+    `) as boolean;
+    if (opened) await sleep(300);
+  }
+
+  private async openModelMenuAndReadOptions(
+    client: CdpClient
+  ): Promise<{ options: PlanModelOption[]; fast: boolean | null }> {
+    await this.openComposerModelTrigger(client);
     await sleep(300);
 
+    const fast = await client.evaluate(`
+      (() => {
+        ${MODEL_MENU_LOOKUP_JS}
+        return readModelFastEnabled();
+      })()
+    `) as boolean | null;
+
+    await this.openModelSubmenu(client);
     const menuVisible = await client.evaluate(`
       (() => {
         ${MODEL_MENU_LOOKUP_JS}
@@ -1161,7 +1247,7 @@ export class CommandExecutor {
 
     await client.pressKey('Escape', 'Escape', 27);
     await sleep(100);
-    return { options };
+    return { options, fast };
   }
 
   private async findFirstMatchingSelector(

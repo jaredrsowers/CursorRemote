@@ -525,6 +525,23 @@ export class Relay {
         socket.emit('command:result', result);
       });
 
+      socket.on('command:set_model_fast', async (payload: CommandPayload) => {
+        if (!payload.commandId || payload.modelFastEnabled === undefined) {
+          socket.emit('command:result', {
+            commandId: payload.commandId ?? 'unknown',
+            ok: false,
+            error: 'Missing commandId or modelFastEnabled',
+          } satisfies CommandResult);
+          return;
+        }
+        console.log(`[relay] Command: set_model_fast to ${payload.modelFastEnabled} from ${socket.id}`);
+        const result = await this.commandExecutor.setModelFast(
+          payload.commandId,
+          payload.modelFastEnabled
+        );
+        socket.emit('command:result', result);
+      });
+
       socket.on('command:get_model_options', async (payload: CommandPayload) => {
         if (!payload.commandId) {
           socket.emit('command:result', {

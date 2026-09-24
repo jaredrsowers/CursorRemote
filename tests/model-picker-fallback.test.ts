@@ -16,20 +16,31 @@ interface MockElement {
   attrs: Record<string, string>;
   id?: string;
   hidden?: boolean;
+  textContent: string;
   getAttribute(name: string): string | null;
   getBoundingClientRect(): { width: number; height: number };
+  click(): void;
 }
 
 function makeEl(attrs: Record<string, string>, id?: string, opts: { hidden?: boolean; rect?: { w: number; h: number } } = {}): MockElement {
+  const clicks = { count: 0 };
   return {
     attrs,
     id,
     hidden: opts.hidden,
+    get textContent() {
+      return this.attrs.__text ?? '';
+    },
     getAttribute(name: string) {
       return this.attrs[name] ?? null;
     },
     getBoundingClientRect() {
       return { width: opts.rect?.w ?? 200, height: opts.rect?.h ?? 100 };
+    },
+    click() {
+      clicks.count++;
+      if (this.attrs['aria-checked'] === 'true') this.attrs['aria-checked'] = 'false';
+      else if (this.attrs['aria-checked'] === 'false') this.attrs['aria-checked'] = 'true';
     },
   };
 }
@@ -61,13 +72,30 @@ function runLookup(doc: MockDoc): MockElement | null {
   return vm.runInNewContext(code, sandbox) as MockElement | null;
 }
 
+const EXPANDED_TRIGGER_SELECTOR =
+  '.ui-model-picker__trigger[aria-expanded="true"],.composer-unified-dropdown-model[aria-expanded="true"],.composer-unified-dropdown[aria-expanded="true"],.composer-bar-input-buttons button[aria-haspopup="menu"][aria-expanded="true"]';
+
 describe('MODEL_MENU_LOOKUP_JS', () => {
+  it('prefers aria-label="Model selection" menu (Cursor 3.8+)', () => {
+    const selectionMenu = makeEl({ role: 'menu', 'aria-label': 'Model selection' });
+    const legacyMenu = makeEl({}, 'legacy');
+    const result = runLookup({
+      byId: new Map(),
+      bySelector: new Map<string, MockElement[]>([
+        ['[aria-label="Model selection"]', [selectionMenu]],
+        ['[data-testid="model-picker-menu"]', [legacyMenu]],
+      ]),
+    });
+    assert.equal(result, selectionMenu);
+  });
+
   it('prefers data-testid="model-picker-menu" when present (legacy Cursor)', () => {
     const legacyMenu = makeEl({}, 'legacy');
     const newMenu = makeEl({ 'data-state': 'open', role: 'menu' }, 'aria');
     const result = runLookup({
       byId: new Map([['aria', newMenu]]),
       bySelector: new Map<string, MockElement[]>([
+        ['[aria-label="Model selection"]', []],
         ['[data-testid="model-picker-menu"]', [legacyMenu]],
         ['[role="menu"][data-state="open"]', [newMenu]],
       ]),
@@ -82,10 +110,8 @@ describe('MODEL_MENU_LOOKUP_JS', () => {
       byId: new Map([['menu-id-42', targetMenu]]),
       bySelector: new Map<string, MockElement[]>([
         ['[data-testid="model-picker-menu"]', []],
-        [
-          '.ui-model-picker__trigger[aria-expanded="true"],.composer-unified-dropdown-model[aria-expanded="true"],.composer-unified-dropdown[aria-expanded="true"]',
-          [openTrigger],
-        ],
+        ['[aria-label="Model selection"]', []],
+        [EXPANDED_TRIGGER_SELECTOR, [openTrigger]],
         ['[role="menu"][data-state="open"]', []],
         ['[role="menu"]:not([hidden])', []],
       ]),
@@ -99,10 +125,8 @@ describe('MODEL_MENU_LOOKUP_JS', () => {
       byId: new Map(),
       bySelector: new Map<string, MockElement[]>([
         ['[data-testid="model-picker-menu"]', []],
-        [
-          '.ui-model-picker__trigger[aria-expanded="true"],.composer-unified-dropdown-model[aria-expanded="true"],.composer-unified-dropdown[aria-expanded="true"]',
-          [],
-        ],
+        ['[aria-label="Model selection"]', []],
+        [EXPANDED_TRIGGER_SELECTOR, []],
         ['[role="menu"][data-state="open"]', [openMenu]],
       ]),
     });
@@ -115,10 +139,8 @@ describe('MODEL_MENU_LOOKUP_JS', () => {
       byId: new Map(),
       bySelector: new Map<string, MockElement[]>([
         ['[data-testid="model-picker-menu"]', []],
-        [
-          '.ui-model-picker__trigger[aria-expanded="true"],.composer-unified-dropdown-model[aria-expanded="true"],.composer-unified-dropdown[aria-expanded="true"]',
-          [],
-        ],
+        ['[aria-label="Model selection"]', []],
+        [EXPANDED_TRIGGER_SELECTOR, []],
         ['[role="menu"][data-state="open"]', []],
         ['[role="menu"]:not([hidden])', [visibleMenu]],
       ]),
@@ -132,6 +154,22 @@ describe('MODEL_MENU_LOOKUP_JS', () => {
       bySelector: new Map(),
     });
     assert.equal(result, null);
+  });
+
+  it('reads Fast toggle state from parameters menu', () => {
+    const code = `${MODEL_MENU_LOOKUP_JS}\nreadModelFastEnabled();`;
+    const fastOn = vm.runInNewContext(code, {
+      document: makeDocument({
+        byId: new Map(),
+        bySelector: new Map<string, MockElement[]>([
+          ['[data-component="menu-toggle-row"]', [
+            makeEl({ role: 'menuitemcheckbox', 'aria-checked': 'true', 'data-component': 'menu-toggle-row', __text: 'Fast' }, 'fast-row'),
+          ]],
+        ]),
+      }),
+      Array,
+    }) as boolean | null;
+    assert.equal(fastOn, true);
   });
 });
 
@@ -325,6 +363,21 @@ describe('MODEL_ITEM_COLLECTOR_JS', () => {
     assert.ok(opts.every(o => !o.id.startsWith('_r_')), 'React useId IDs must not be returned');
   });
 
+  it('collects Cursor 3.8 model selection rows with data-testid ids', () => {
+    const opts = run(`
+      <div role="menu" aria-label="Model selection">
+        <li role="menuitem" data-component="menu-row" data-testid="auto-mode-select"><span>Auto</span></li>
+        <li role="menuitem" data-component="menu-row" data-testid="model-item-composer-2.5"><span>Composer 2.5</span><i class="ui-icon"></i></li>
+        <li role="menuitem" data-component="menu-row"><span>Add Models</span></li>
+      </div>
+    `);
+    const labels = JSON.parse(JSON.stringify(opts.map((o) => o.label).sort())) as string[];
+    assert.deepEqual(labels, ['Auto', 'Composer 2.5']);
+    assert.equal(opts.find((o) => o.label === 'Composer 2.5')?.id, 'model-item-composer-2.5');
+    assert.equal(opts.find((o) => o.label === 'Composer 2.5')?.selected, true);
+    assert.equal(opts.find((o) => o.label === 'Auto')?.id, 'auto-mode-select');
+  });
+
   it('uses a synthetic label:: id when the row has no stable id', () => {
     const opts = run(`
       <div role="menu">
@@ -369,12 +422,20 @@ describe('MODEL_ITEM_COLLECTOR_JS', () => {
 });
 
 describe('selectors.json modelDropdown', () => {
-  it('lists both the new and the legacy trigger selectors', () => {
+  it('lists the Cursor 3.8 selector first with legacy fallbacks', () => {
     const raw = readFileSync(resolve('selectors.json'), 'utf-8');
     const parsed = JSON.parse(raw) as { modelDropdown?: { strategies?: string[] } };
     const strategies = parsed.modelDropdown?.strategies ?? [];
-    assert.ok(strategies.includes('.ui-model-picker__trigger'), 'new selector missing');
+    assert.ok(
+      strategies.includes('.composer-bar-input-buttons button[aria-haspopup="menu"]'),
+      'Cursor 3.8 selector missing'
+    );
+    assert.ok(strategies.includes('.ui-model-picker__trigger'), 'legacy selector missing');
     assert.ok(strategies.includes('.composer-unified-dropdown-model'), 'legacy fallback missing');
-    assert.equal(strategies[0], '.ui-model-picker__trigger', 'new selector should be tried first');
+    assert.equal(
+      strategies[0],
+      '.composer-bar-input-buttons button[aria-haspopup="menu"]',
+      'Cursor 3.8 selector should be tried first'
+    );
   });
 });

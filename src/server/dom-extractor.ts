@@ -133,6 +133,49 @@ export function extractionFunction(
     return null;
   };
 
+  const MODEL_NAME_RE = /^(Auto|Composer|Opus|Sonnet|GPT|Claude|Gemini|Grok|Muse)/i;
+
+  const findModelDropdownInScope = (scope: ParentNode): Element | null => {
+    const strategies = [
+      'button[aria-haspopup="menu"]',
+      '.composer-unified-dropdown-model',
+      '.ui-model-picker__trigger',
+    ];
+    for (const sel of strategies) {
+      try {
+        const candidates = scope.querySelectorAll(sel);
+        for (const c of Array.from(candidates)) {
+          if (sel === 'button[aria-haspopup="menu"]') {
+            const text = (c.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!MODEL_NAME_RE.test(text) || text.length > 60) continue;
+          }
+          const cId = c.getAttribute('id') || '';
+          if (cId.startsWith('plan-exec-model')) continue;
+          return c;
+        }
+      } catch { /* skip */ }
+    }
+    return null;
+  };
+
+  const readModelFromElement = (el: Element): { modelName: string; modelId: string } => {
+    let modelName = '';
+    if (el.tagName === 'BUTTON') {
+      modelName = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    } else {
+      const spans = el.querySelectorAll('span');
+      for (const s of Array.from(spans)) {
+        const t = (s.textContent || '').trim();
+        if (t && !t.includes('chevron') && t.length > 1) {
+          modelName = t;
+          break;
+        }
+      }
+    }
+    const modelId = el.getAttribute('data-testid') || el.getAttribute('id') || '';
+    return { modelName, modelId };
+  };
+
   const resolveToolCallCardRoot = (body: Element): Element | null =>
     body.closest('[class*="tool-call-card"]:not([class*="tool-call-card__"])') ?? body.parentElement;
 
@@ -769,19 +812,13 @@ export function extractionFunction(
 
         const actions = extractPlanWidgetActions(planContainer);
 
-        const modelEl = planContainer.querySelector('.composer-unified-dropdown-model');
+        const modelEl = findModelDropdownInScope(planContainer);
         let model: string | undefined;
         let modelDropdownSelectorPath: string | undefined;
         if (modelEl) {
           modelDropdownSelectorPath = buildSelectorPath(modelEl);
-          const spans = modelEl.querySelectorAll('span');
-          for (const s of Array.from(spans)) {
-            const t = (s.textContent || '').trim();
-            if (t && !t.includes('chevron') && t.length > 1) {
-              model = t;
-              break;
-            }
-          }
+          const parsed = readModelFromElement(modelEl);
+          if (parsed.modelName) model = parsed.modelName;
         }
 
         return {
@@ -1859,15 +1896,9 @@ export function extractionFunction(
     let modelName = '';
     let modelId = '';
     if (modelEl) {
-      const spans = modelEl.querySelectorAll('span');
-      for (const s of Array.from(spans)) {
-        const t = (s.textContent || '').trim();
-        if (t && !t.includes('chevron') && t.length > 1) {
-          modelName = t;
-          break;
-        }
-      }
-      modelId = modelEl.getAttribute('id') || '';
+      const parsed = readModelFromElement(modelEl);
+      modelName = parsed.modelName;
+      modelId = parsed.modelId;
     }
     const model: ModelInfo = {
       current: modelName || 'Auto',

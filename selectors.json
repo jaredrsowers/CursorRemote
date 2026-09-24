@@ -70,6 +70,7 @@
   },
   "modelDropdown": {
     "strategies": [
+      ".composer-bar-input-buttons button[aria-haspopup=\"menu\"]",
       ".ui-model-picker__trigger",
       ".composer-unified-dropdown-model"
     ]
