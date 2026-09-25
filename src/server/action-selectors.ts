@@ -7,6 +7,7 @@ export const ACTION_SELECTORS: Record<string, string[]> = {
   alw: ['button.ui-shell-tool-call__allowlist-button', '.composer-tool-call-status-row .anysphere-secondary-button.composer-run-button'],
   bld: ['.composer-create-plan-build-button'],
   vpl: ['.composer-create-plan-view-plan-button'],
+  stp: ['button.ui-shell-tool-call__glass-stop', '[aria-label="Stop command"]'],
 };
 
 export function resolveStableActionSelector(action: string): string | undefined {

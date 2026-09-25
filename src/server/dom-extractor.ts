@@ -2126,6 +2126,55 @@ export function extractionFunction(
       }
     }
 
+    const isDisabledButton = (el: Element): boolean =>
+      el.tagName === 'BUTTON' && !!(el as HTMLButtonElement).disabled;
+
+    const isVisibleActionButton = (el: Element): boolean => {
+      if (isDisabledButton(el)) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 || rect.height > 0) return true;
+      try {
+        const style = getComputedStyle(el);
+        return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) > 0;
+      } catch {
+        return false;
+      }
+    };
+
+    const findStopButtonInScope = (scope: ParentNode): Element | null => {
+      const selectors = [
+        'button.ui-shell-tool-call__glass-stop',
+        '[aria-label="Stop command"]',
+      ];
+      for (const selector of selectors) {
+        for (const btn of Array.from(scope.querySelectorAll(selector))) {
+          if (isVisibleActionButton(btn)) return btn;
+        }
+      }
+      return null;
+    };
+
+    const hasActiveWork =
+      agentStatus !== 'idle' || hasLoadingIndicator || hasLoadingTool || _shimmer.length > 0;
+
+    let agentStop: { selectorPath: string } | null = null;
+    const stopScopes = [container, toolbarSection, document.querySelector('.composer-bar')].filter(
+      Boolean
+    ) as ParentNode[];
+    for (const scope of stopScopes) {
+      let stopBtn = findStopButtonInScope(scope);
+      if (!stopBtn && hasActiveWork) {
+        stopBtn =
+          scope.querySelector('button.ui-shell-tool-call__glass-stop') ??
+          scope.querySelector('[aria-label="Stop command"]');
+        if (stopBtn && isDisabledButton(stopBtn)) stopBtn = null;
+      }
+      if (stopBtn) {
+        agentStop = { selectorPath: 'stable:stp' };
+        break;
+      }
+    }
+
     return {
       connected: true,
       extractorStatus: 'ok',
@@ -2148,6 +2197,7 @@ export function extractionFunction(
       composerQueue: { items: queueItems, ...(queueLabel ? { queueLabel } : {}) },
       questionnaire,
       planReview,
+      agentStop,
       _rawSignals,
     };
   } catch {

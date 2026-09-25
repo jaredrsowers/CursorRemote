@@ -158,6 +158,31 @@ describe('extractionFunction', () => {
     assert.notEqual(state.agentStatus, 'waiting_approval');
   });
 
+  it('extracts agentStop from Stop command button while agent is active', () => {
+    const state = withDom(`
+      <main id="root">
+        <div class="composer-bar">
+          <div class="make-shine">Planning next moves</div>
+          <button type="button" class="ui-shell-tool-call__glass-stop" aria-label="Stop command">Stop</button>
+        </div>
+      </main>
+    `);
+
+    assert.equal(state.agentStop?.selectorPath, 'stable:stp');
+  });
+
+  it('does not set agentStop when Stop command button is absent', () => {
+    const state = withDom(`
+      <main id="root">
+        <div class="composer-bar">
+          <button type="button">Send</button>
+        </div>
+      </main>
+    `);
+
+    assert.equal(state.agentStop, null);
+  });
+
   it('extracts Build when label includes glued keyboard shortcut (BuildCtrl+⏎)', () => {
     const state = withDom(`
       <main id="root">

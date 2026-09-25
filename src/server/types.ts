@@ -74,6 +74,11 @@ export interface PlanReview {
   viewPlanSelectorPath?: string;
 }
 
+/** Stop-agent control in the composer toolbar while the agent is running. */
+export interface AgentStop {
+  selectorPath: string;
+}
+
 export interface CursorState {
   connected: boolean;
   /** Health of DOM extraction independent from the CDP websocket connection. */
@@ -109,6 +114,8 @@ export interface CursorState {
   questionnaire: Questionnaire | null;
   /** Plan review controls in the composer toolbar when Build/View Plan are outside the transcript. */
   planReview: PlanReview | null;
+  /** Stop control in the composer toolbar while the agent is running. */
+  agentStop: AgentStop | null;
   _rawSignals?: RawSignals;
 }
 

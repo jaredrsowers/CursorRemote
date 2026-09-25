@@ -38,6 +38,7 @@ export interface WindowSnapshot {
    *  when the window is not the active CDP home window. Null when absent. */
   questionnaire: Questionnaire | null;
   planReview: import('./types.js').PlanReview | null;
+  agentStop: import('./types.js').AgentStop | null;
   lastUpdated: number;
   /** data-composer-id of the active composer in this window. Same agent shown
    *  via Cursor's global rail in another window will share this id; two
@@ -258,6 +259,7 @@ export class WindowMonitor extends EventEmitter {
       model: state.model,
       questionnaire: state.questionnaire,
       planReview: state.planReview,
+      agentStop: state.agentStop,
       lastUpdated: Date.now(),
       activeComposerId: state.activeComposerId ?? '',
     };
@@ -271,6 +273,8 @@ export class WindowMonitor extends EventEmitter {
     const prevQuestionnaireSig = prev ? questionnaireFingerprint(prev.questionnaire) : '';
     const planReviewSig = JSON.stringify(snapshot.planReview);
     const prevPlanReviewSig = prev ? JSON.stringify(prev.planReview) : '';
+    const agentStopSig = JSON.stringify(snapshot.agentStop);
+    const prevAgentStopSig = prev ? JSON.stringify(prev.agentStop) : '';
     const changed = !prev
       || prev.messages.length !== snapshot.messages.length
       || (prev.messages.length > 0 && prev.messages[prev.messages.length - 1]?.id !== snapshot.messages[snapshot.messages.length - 1]?.id)
@@ -281,6 +285,7 @@ export class WindowMonitor extends EventEmitter {
       || approvalSig !== prevApprovalSig
       || questionnaireSig !== prevQuestionnaireSig
       || planReviewSig !== prevPlanReviewSig
+      || agentStopSig !== prevAgentStopSig
       || queueSig !== prevQueueSig
       || prev.mode?.current !== snapshot.mode?.current
       || prev.model?.current !== snapshot.model?.current
@@ -383,6 +388,7 @@ export class WindowMonitor extends EventEmitter {
           model: state.model,
           questionnaire: state.questionnaire,
           planReview: state.planReview,
+          agentStop: state.agentStop,
           lastUpdated: Date.now(),
           activeComposerId: state.activeComposerId ?? '',
         };
@@ -396,6 +402,8 @@ export class WindowMonitor extends EventEmitter {
         const pqnSig = prev ? questionnaireFingerprint(prev.questionnaire) : '';
         const prSig = JSON.stringify(snapshot.planReview);
         const pprSig = prev ? JSON.stringify(prev.planReview) : '';
+        const asSig = JSON.stringify(snapshot.agentStop);
+        const pasSig = prev ? JSON.stringify(prev.agentStop) : '';
         const changed = !prev
           || prev.messages.length !== snapshot.messages.length
           || (prev.messages.length > 0 && prev.messages[prev.messages.length - 1]?.id !== snapshot.messages[snapshot.messages.length - 1]?.id)
@@ -406,6 +414,7 @@ export class WindowMonitor extends EventEmitter {
           || aSig !== paSig
           || qnSig !== pqnSig
           || prSig !== pprSig
+          || asSig !== pasSig
           || qSig !== pqSig
           || prev.mode?.current !== snapshot.mode?.current
           || prev.model?.current !== snapshot.model?.current

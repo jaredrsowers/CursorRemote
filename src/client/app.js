@@ -25,6 +25,7 @@
     composerQueue: { items: [] },
     questionnaire: null,
     planReview: null,
+    agentStop: null,
   };
 
   function getAuthToken() {
@@ -128,6 +129,7 @@
   const $connText = document.getElementById('connection-text');
   const $statusIcon = document.getElementById('agent-status-icon');
   const $statusText = document.getElementById('agent-status-text');
+  const $btnStop = document.getElementById('btn-stop');
   const $headerRight = document.querySelector('#header .header-right');
   const $approvalBar = document.getElementById('approval-bar');
   const $approvalDesc = document.getElementById('approval-desc');
@@ -352,6 +354,12 @@
     if (!review) return;
     clickPlanBuild(review.buildSelectorPath, 'Build');
   });
+  $btnStop.addEventListener('click', () => {
+    const stop = state.agentStop;
+    if (!stop?.selectorPath) return;
+    emitClickAction(stop.selectorPath);
+    showToast('Stop sent', 'success');
+  });
 
   function sendMessage() {
     const text = $input.value.trim();
@@ -366,6 +374,7 @@
   function renderAll() {
     renderConnectionStatus();
     renderAgentStatus();
+    renderAgentStop();
     renderComposerQueue();
     renderWindows();
     renderMessages();
@@ -461,7 +470,9 @@
     const activityLive = !!state.agentActivityLive;
     const baseLabel = labels[state.agentStatus] || state.agentStatus;
     if ($headerRight) {
-      if (state.agentStatus !== 'idle') $headerRight.classList.remove('header-right-hidden');
+      const showHeader =
+        state.agentStatus !== 'idle' || !!(state.agentStop && state.agentStop.selectorPath);
+      if (showHeader) $headerRight.classList.remove('header-right-hidden');
       else $headerRight.classList.add('header-right-hidden');
     }
     if (activityLive && activity && state.agentStatus !== 'idle') {
@@ -476,6 +487,15 @@
     if (state.agentStatus === 'waiting_approval') $statusText.style.color = 'var(--accent-yellow)';
     else if (state.agentStatus === 'error') $statusText.style.color = 'var(--accent-red)';
     else $statusText.style.color = '';
+  }
+
+  function renderAgentStop() {
+    const stop = state.agentStop;
+    if (!stop?.selectorPath) {
+      $btnStop.classList.add('hidden');
+      return;
+    }
+    $btnStop.classList.remove('hidden');
   }
 
   function renderComposerQueue() {

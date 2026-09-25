@@ -90,6 +90,21 @@ header {
   display: none;
 }
 
+.btn-stop {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent-red);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-stop.hidden { display: none; }
+
 .dot {
   width: 8px;
   height: 8px;

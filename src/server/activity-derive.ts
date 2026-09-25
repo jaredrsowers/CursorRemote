@@ -173,13 +173,27 @@ export function deriveActivityFromSignals(
 }
 
 export function applyDerivedActivityToState(state: CursorState): CursorState {
-  if (!state._rawSignals) return state;
+  if (!state._rawSignals) return ensureAgentStop(state);
   const derived = deriveActivityFromSignals(state._rawSignals, state.messages, state.agentStatus);
-  return {
+  return ensureAgentStop({
     ...state,
     agentStatus: derived.status,
     agentActivityText: derived.activityText,
     agentActivityLive: derived.isLive,
     agentActivitySource: derived.source,
-  };
+  });
+}
+
+function agentIsStoppable(state: CursorState): boolean {
+  return (
+    !!state.agentActivityLive ||
+    state.agentStatus === 'thinking' ||
+    state.agentStatus === 'generating' ||
+    state.agentStatus === 'running_tool'
+  );
+}
+
+export function ensureAgentStop(state: CursorState): CursorState {
+  if (!agentIsStoppable(state)) return state.agentStop ? { ...state, agentStop: null } : state;
+  return { ...state, agentStop: { selectorPath: 'stable:stp' } };
 }

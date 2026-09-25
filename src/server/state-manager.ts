@@ -25,6 +25,7 @@ function emptyState(): CursorState {
     composerQueue: { items: [] },
     questionnaire: null,
     planReview: null,
+    agentStop: null,
   };
 }
 
@@ -326,6 +327,11 @@ export class StateManager extends EventEmitter {
 
     if (JSON.stringify(prev.planReview) !== JSON.stringify(next.planReview)) {
       patch.planReview = next.planReview;
+      hasChange = true;
+    }
+
+    if (JSON.stringify(prev.agentStop) !== JSON.stringify(next.agentStop)) {
+      patch.agentStop = next.agentStop;
       hasChange = true;
     }
 

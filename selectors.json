@@ -74,5 +74,12 @@
       ".ui-model-picker__trigger",
       ".composer-unified-dropdown-model"
     ]
+  },
+  "stopButton": {
+    "strategies": [
+      "button.ui-shell-tool-call__glass-stop",
+      "[aria-label=\"Stop command\"]"
+    ],
+    "textMatch": ["Stop"]
   }
 }

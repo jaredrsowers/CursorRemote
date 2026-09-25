@@ -754,17 +754,27 @@ export class CommandExecutor {
     return this.withRetry(commandId, async (client) => {
       const resolvedPath = resolveSelectorPath(selectorPath);
       if (selectorPath.startsWith('stable:')) {
-        const label = expectedLabel ?? (selectorPath === 'stable:bld' ? 'Build' : selectorPath === 'stable:vpl' ? 'View Plan' : '');
+        const label = expectedLabel ?? (
+          selectorPath === 'stable:bld' ? 'Build'
+          : selectorPath === 'stable:vpl' ? 'View Plan'
+          : selectorPath === 'stable:stp' ? 'Stop'
+          : ''
+        );
         const result = await client.evaluate(`
           (() => {
             const label = ${JSON.stringify(label)};
             const selectorList = ${JSON.stringify(resolvedPath.split(',').map((s) => s.trim()).filter(Boolean))};
+            const labelLc = label.toLowerCase();
+            const labelMatches = (text) => {
+              const textLc = text.toLowerCase();
+              return !label || textLc === labelLc || (labelLc === 'stop' && /stop/i.test(textLc));
+            };
             for (const sel of selectorList) {
               try {
                 const el = document.querySelector(sel);
                 if (el) {
                   const text = (el.textContent || el.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim();
-                  if (!label || text.toLowerCase() === label.toLowerCase()) {
+                  if (labelMatches(text)) {
                     el.scrollIntoView({ block: 'center', behavior: 'instant' });
                     el.click();
                     return { ok: true };
@@ -773,9 +783,10 @@ export class CommandExecutor {
               } catch {}
             }
             const scopes = [
+              document.querySelector('.composer-bar'),
+              document.querySelector('#composer-toolbar-section'),
               ...Array.from(document.querySelectorAll('[class*="tool-call-card__body"]')).reverse(),
               document.querySelector('.composer-create-plan-container'),
-              document.querySelector('#composer-toolbar-section'),
               document.querySelector('#workbench\\\\.parts\\\\.auxiliarybar'),
             ].filter(Boolean);
             for (const scope of scopes) {
@@ -796,7 +807,14 @@ export class CommandExecutor {
               for (const btn of Array.from(scope.querySelectorAll('button, [role="button"]'))) {
                 const text = (btn.textContent || btn.getAttribute('aria-label') || btn.getAttribute('title') || '')
                   .replace(/\\s+/g, ' ').trim();
-                if (label && (text.toLowerCase() === label.toLowerCase() || (label.toLowerCase() === 'build' && /build/i.test(text)))) {
+                const labelLc = label.toLowerCase();
+                const textLc = text.toLowerCase();
+                if (
+                  label &&
+                  (textLc === labelLc ||
+                    (labelLc === 'build' && /build/i.test(text)) ||
+                    (labelLc === 'stop' && /stop/i.test(text)))
+                ) {
                   btn.scrollIntoView({ block: 'center', behavior: 'instant' });
                   btn.click();
                   return { ok: true };

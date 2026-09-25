@@ -148,6 +148,26 @@ describe('web: agent status', () => {
     const text = env.document.getElementById('agent-status-text')!;
     assert.match(text.textContent!, /Idle/i);
   });
+
+  it('shows Stop button when agentStop is available', () => {
+    const fixture = loadFixture('activity-shimmer-lifecycle.jsonl');
+    const state = {
+      ...fixture[1].state!,
+      agentStop: { selectorPath: 'button#stop-agent' },
+    };
+    fireFullState(env.mockSocket, state);
+    const stopBtn = env.document.getElementById('btn-stop');
+    assert.ok(stopBtn, 'Should render Stop button');
+    assert.ok(!stopBtn!.classList.contains('hidden'));
+  });
+
+  it('hides Stop button when agentStop is null', () => {
+    const fixture = loadFixture('activity-shimmer-lifecycle.jsonl');
+    const state = { ...fixture[0].state!, agentStop: null };
+    fireFullState(env.mockSocket, state);
+    const stopBtn = env.document.getElementById('btn-stop');
+    assert.ok(stopBtn?.classList.contains('hidden'));
+  });
 });
 
 // ─── Message rendering ───

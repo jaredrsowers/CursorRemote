@@ -5,6 +5,7 @@ import { resolve } from 'path';
 import {
   deriveActivityFromSignals,
   applyDerivedActivityToState,
+  ensureAgentStop,
   collapsibleHeaderTextLooksComplete,
   sanitizeActivityLabel,
 } from '../src/server/activity-derive.js';
@@ -209,6 +210,47 @@ describe('applyDerivedActivityToState', () => {
     assert.equal(result.agentStatus, 'idle');
     assert.equal(result.agentActivityText, null);
     assert.equal(result.agentActivityLive, false);
+  });
+
+  it('adds stable stop selector while agent is thinking', () => {
+    const snapshots = loadFixture('activity-shimmer-lifecycle.jsonl');
+    const thinkingSnapshot = snapshots[1].state!;
+    const result = applyDerivedActivityToState(thinkingSnapshot);
+    assert.equal(result.agentStop?.selectorPath, 'stable:stp');
+  });
+
+  it('clears stop selector when agent is idle', () => {
+    const snapshots = loadFixture('activity-shimmer-lifecycle.jsonl');
+    const idleSnapshot = { ...snapshots[4].state!, agentStop: { selectorPath: 'stable:stp' } };
+    const result = applyDerivedActivityToState(idleSnapshot);
+    assert.equal(result.agentStop, null);
+  });
+});
+
+describe('ensureAgentStop', () => {
+  it('returns stable stop for live running tool activity', () => {
+    const state: CursorState = {
+      connected: true,
+      extractorStatus: 'ok',
+      lastExtractionAt: null,
+      consecutiveExtractionFailures: 0,
+      lastExtractionError: null,
+      agentStatus: 'running_tool',
+      agentActivityText: 'Running',
+      agentActivityLive: true,
+      agentActivitySource: 'loading_tool',
+      messages: [],
+      pendingApprovals: [],
+      inputAvailable: true,
+      chatTabs: [],
+      mode: { current: 'agent', available: [] },
+      model: { current: 'Auto' },
+      windows: [],
+      activeWindowId: '',
+      composerQueue: { items: [] },
+      agentStop: null,
+    };
+    assert.equal(ensureAgentStop(state).agentStop?.selectorPath, 'stable:stp');
   });
 
   it('passes through state without _rawSignals unchanged', () => {
